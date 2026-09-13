@@ -1,0 +1,192 @@
+---
+title: "SMS Number Endpoints: List Numbers and Check Registration"
+sidebarTitle: "Numbers"
+description: "REST endpoints to list provisioned phone numbers and check carrier registration. US carrier registration must be complete before sending production SMS."
+---
+
+Before you can send SMS messages at scale in the United States, carriers require you to register your sending numbers and use case. Lath provisions phone numbers for your project and manages the carrier registration process on your behalf. Use these endpoints to inspect which numbers are available to you and to check the current state of your carrier registration.
+
+## POST /v1/sms/number/list
+
+List all phone numbers provisioned for your project.
+
+### Request
+
+This endpoint takes no request body.
+
+### Response
+
+<ResponseField name="numbers" type="array">
+  Array of number objects provisioned for your project.
+
+  <Expandable title="number fields">
+    <ResponseField name="numbers[].number" type="string">
+      The phone number in E.164 format (e.g. `"+18005551234"`).
+    </ResponseField>
+
+    <ResponseField name="numbers[].type" type="string">
+      The number type:
+      - `long_code` — a standard 10-digit long code (10DLC), suitable for conversational and transactional messages.
+      - `toll_free` — a toll-free number, commonly used for high-volume marketing and notifications.
+    </ResponseField>
+
+    <ResponseField name="numbers[].country" type="string">
+      ISO 3166-1 alpha-2 country code (e.g. `"US"`, `"CA"`).
+    </ResponseField>
+
+    <ResponseField name="numbers[].status" type="string">
+      Current status of the number:
+      - `active` — ready to send and receive messages.
+      - `pending` — provisioned but not yet active (carrier propagation in progress).
+      - `suspended` — temporarily suspended due to a carrier or compliance issue.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/sms/number/list \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+```typescript TypeScript SDK
+import { LathClient } from "@trylath/sdk";
+
+const lath = new LathClient({ apiKey: process.env.LATH_SECRET_KEY });
+
+const { result } = await lath.sms.numbers.list();
+
+for (const num of result.numbers) {
+  console.log(`${num.number} (${num.type}) — ${num.status}`);
+}
+```
+
+</CodeGroup>
+
+### Example response
+
+```json
+{
+  "activityId": "act_01hx9z3k2q7p4m8w",
+  "result": {
+    "numbers": [
+      {
+        "number": "+18005551234",
+        "type": "toll_free",
+        "country": "US",
+        "status": "active"
+      },
+      {
+        "number": "+14155557890",
+        "type": "long_code",
+        "country": "US",
+        "status": "active"
+      }
+    ]
+  }
+}
+```
+
+---
+
+## POST /v1/sms/registration/get
+
+Check the carrier registration status for your project. In the US, both 10DLC long codes and toll-free numbers require a registration that describes your organisation and messaging use case.
+
+### Request
+
+This endpoint takes no request body.
+
+### Response
+
+<ResponseField name="status" type="string">
+  Current registration state:
+  - `not_started` — no registration has been submitted yet.
+  - `pending` — submitted and under review by the carrier ecosystem.
+  - `approved` — registration is approved; numbers are cleared for production sending.
+  - `rejected` — the submission was rejected; see `rejectedReason` for details.
+</ResponseField>
+
+<ResponseField name="submittedAt" type="string | null">
+  ISO 8601 timestamp of when the registration was submitted, or `null` if not yet started.
+</ResponseField>
+
+<ResponseField name="approvedAt" type="string | null">
+  ISO 8601 timestamp of when the registration was approved, or `null` if not yet approved.
+</ResponseField>
+
+<ResponseField name="rejectedReason" type="string | null">
+  Human-readable explanation of why the registration was rejected, or `null` if not rejected.
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/sms/registration/get \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.sms.registration.get();
+
+switch (result.status) {
+  case "approved":
+    console.log("Approved at:", result.approvedAt);
+    break;
+  case "pending":
+    console.log("Submitted at:", result.submittedAt, "— awaiting approval");
+    break;
+  case "rejected":
+    console.error("Rejected:", result.rejectedReason);
+    break;
+  case "not_started":
+    console.log("Registration not yet submitted. Complete it in the dashboard.");
+    break;
+}
+```
+
+</CodeGroup>
+
+### Example responses
+
+<Tabs>
+  <Tab title="Approved">
+    ```json
+    {
+      "activityId": "act_01hx9z3k2q7p4m8w",
+      "result": {
+        "status": "approved",
+        "submittedAt": "2025-07-15T10:30:00Z",
+        "approvedAt": "2025-07-22T14:05:00Z",
+        "rejectedReason": null
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Rejected">
+    ```json
+    {
+      "activityId": "act_01hx9z3k2q7p4m8x",
+      "result": {
+        "status": "rejected",
+        "submittedAt": "2025-07-15T10:30:00Z",
+        "approvedAt": null,
+        "rejectedReason": "Website URL provided does not display a compliant opt-in disclosure"
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  Carrier registration is required before sending production SMS in the United States. Messages sent while registration is `pending` or `not_started` may be filtered by carriers. Complete the registration flow in the Lath dashboard under **SMS → Registration**.
+</Note>
+
+<Warning>
+  If your registration is `rejected`, review the `rejectedReason` carefully. Common rejection causes include missing opt-in disclosures on your website, vague use-case descriptions, or a mismatch between the registered brand name and your domain. Resubmit via the dashboard after correcting the issues.
+</Warning>

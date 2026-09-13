@@ -1,0 +1,206 @@
+---
+title: "POST /v1/sms/send — Send a Single SMS Text Message"
+sidebarTitle: "Send SMS"
+description: "Send a single SMS to one recipient. Consent, quiet hours, and spending cap are checked before queuing. The response includes segment count and encoding."
+---
+
+Sending an SMS through Lath is a single POST request. Before the message is queued, the platform checks that the recipient has active consent for the given topic on the `sms` channel, that the current time falls outside any configured quiet hours for the recipient's timezone, and that your project has not hit its spending cap. If any check fails, the message is not sent and the response tells you exactly why.
+
+You can supply a message inline via `body` or reference a published SMS template via `template` — but not both. When using a template, pass `variables` to substitute placeholders at render time.
+
+## Request
+
+<ParamField body="to" type="string" required>
+  The recipient's phone number in E.164 format (e.g. `"+14155551234"`). Numbers without a `+` prefix are rejected.
+</ParamField>
+
+<ParamField body="topic" type="string" required>
+  The consent topic string that gates delivery (e.g. `"transactional"`, `"alerts"`). The recipient must have an active grant for this topic on the `sms` channel.
+</ParamField>
+
+<ParamField body="body" type="string">
+  The raw message text to send. Required if `template` is not provided. Maximum 1600 characters (10 SMS segments of 160 GSM-7 characters each).
+</ParamField>
+
+<ParamField body="template" type="string">
+  Name of a published SMS template. Required if `body` is not provided. Cannot be used together with `body`.
+</ParamField>
+
+<ParamField body="variables" type="object">
+  Key-value pairs substituted into the template at render time. Values must be strings, numbers, or booleans. Ignored when using `body`.
+</ParamField>
+
+<ParamField body="sendAfter" type="string">
+  ISO 8601 datetime to schedule the message for future delivery (e.g. `"2025-09-01T09:00:00Z"`). Omit to send immediately. Quiet-hours checks are evaluated at the scheduled send time, not at request time.
+</ParamField>
+
+## Response
+
+Every response envelope has the shape `{ activityId, result }`. The fields below live inside `result`.
+
+<ResponseField name="messageId" type="string">
+  UUID assigned to this queued message.
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  `queued` — the message was accepted and is being delivered.  
+  `suppressed` — the message was blocked; see the `blocked` field for details.
+</ResponseField>
+
+<ResponseField name="to" type="string">
+  The recipient phone number as normalised by the platform.
+</ResponseField>
+
+<ResponseField name="segments" type="integer">
+  Number of SMS billing segments the message occupies. GSM-7 messages use 160 characters per segment; UCS-2 (Unicode) messages use 70 characters per segment.
+</ResponseField>
+
+<ResponseField name="encoding" type="string">
+  `gsm-7` — message uses only standard GSM characters.  
+  `ucs-2` — message contains Unicode characters (emoji, accented letters, etc.), which reduces characters per segment.
+</ResponseField>
+
+<ResponseField name="template" type="string | null">
+  The template name used, or `null` if `body` was provided directly.
+</ResponseField>
+
+<ResponseField name="templateVersion" type="integer | null">
+  The published template version at send time, or `null` for inline body sends.
+</ResponseField>
+
+<ResponseField name="sendAfter" type="string | null">
+  The scheduled delivery time, or `null` for immediate sends.
+</ResponseField>
+
+<ResponseField name="blocked" type="object | null">
+  Present only when `status` is `suppressed`.
+
+  <Expandable title="blocked fields">
+    <ResponseField name="blocked.reason" type="string">
+      Human-readable explanation of why the message was blocked (e.g. `"Quiet hours active for recipient timezone America/New_York"`, `"Recipient has STOP on channel 'sms'"`, `"Spending cap reached"`).
+    </ResponseField>
+
+    <ResponseField name="blocked.fix" type="string">
+      Suggested remediation step.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+
+```bash curl — inline body
+curl -X POST https://platform.trylath.com/v1/sms/send \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: sms-otp-user-7892-attempt-1" \
+  -d '{
+    "to": "+14155551234",
+    "topic": "transactional",
+    "body": "Your Acme verification code is 483921. It expires in 10 minutes."
+  }'
+```
+
+```bash curl — template
+curl -X POST https://platform.trylath.com/v1/sms/send \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: sms-shipment-order-99" \
+  -d '{
+    "to": "+14155551234",
+    "topic": "transactional",
+    "template": "shipment-update",
+    "variables": {
+      "orderNumber": "ORD-0099",
+      "trackingUrl": "https://track.acme.com/ORD-0099"
+    }
+  }'
+```
+
+```typescript TypeScript SDK
+import { LathClient } from "@trylath/sdk";
+
+const lath = new LathClient({ apiKey: process.env.LATH_SECRET_KEY });
+
+// Inline body
+const { result } = await lath.sms.send({
+  to: "+14155551234",
+  topic: "transactional",
+  body: "Your Acme verification code is 483921. It expires in 10 minutes.",
+});
+
+console.log(`Queued ${result.segments} segment(s) [${result.encoding}]`);
+
+// Template with variables
+const { result: tplResult } = await lath.sms.send({
+  to: "+14155551234",
+  topic: "transactional",
+  template: "shipment-update",
+  variables: {
+    orderNumber: "ORD-0099",
+    trackingUrl: "https://track.acme.com/ORD-0099",
+  },
+});
+
+if (tplResult.status === "suppressed") {
+  console.warn("Blocked:", tplResult.blocked?.reason);
+}
+```
+
+</CodeGroup>
+
+### Successful response example
+
+```json
+{
+  "activityId": "act_01hx9z3k2q7p4m8w",
+  "result": {
+    "messageId": "msg_01hx9z3k2q7p4m8x",
+    "status": "queued",
+    "to": "+14155551234",
+    "segments": 1,
+    "encoding": "gsm-7",
+    "template": null,
+    "templateVersion": null,
+    "sendAfter": null,
+    "blocked": null
+  }
+}
+```
+
+### Suppressed response example
+
+```json
+{
+  "activityId": "act_01hx9z3k2q7p4m8y",
+  "result": {
+    "messageId": "msg_01hx9z3k2q7p4m8z",
+    "status": "suppressed",
+    "to": "+14155551234",
+    "segments": 1,
+    "encoding": "gsm-7",
+    "template": null,
+    "templateVersion": null,
+    "sendAfter": null,
+    "blocked": {
+      "reason": "Recipient has STOP on channel 'sms'",
+      "fix": "The recipient must text START to re-subscribe"
+    }
+  }
+}
+```
+
+## Segment and encoding notes
+
+<Tip>
+  Emoji and characters outside the GSM-7 character set trigger UCS-2 encoding, which cuts the characters-per-segment limit from 160 to 70. A single emoji in a 100-character message will cost 2 segments. Keep marketing copy in GSM-7 to reduce costs.
+</Tip>
+
+## Quiet hours
+
+If you have quiet hours configured for your project, any send request that arrives during the restricted window for the recipient's timezone is either blocked (`suppressed`) or held until the window opens, depending on your project settings. Pass `sendAfter` to explicitly target a time outside quiet hours.
+
+## Idempotency
+
+Pass an `Idempotency-Key` header on every send request. Retrying the same key within 24 hours returns the original response without queuing a duplicate message.

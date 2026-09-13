@@ -1,0 +1,216 @@
+---
+title: "Send SMS Messages with Lath: Body, Templates, and Scheduling"
+sidebarTitle: "Send SMS"
+description: "POST to /v1/sms/send to deliver a text message. Use templates for multi-locale sends, or pass a body directly. All sends check consent and quiet hours."
+---
+
+`POST /v1/sms/send` delivers a single SMS to one recipient. Before the message is queued, Lath checks the contact's SMS consent for the specified topic, applies quiet hours for their timezone, confirms carrier registration is active, and verifies the send falls within your account's spending cap. If every check passes, the message is queued for delivery and you receive a `messageId` to track it.
+
+## Request fields
+
+<ParamField body="to" type="string" required>
+  The recipient's phone number in E.164 format, e.g. `+14155550100`. Lath uses this number to look up or create the unified contact record and to resolve the recipient's timezone for quiet hours.
+</ParamField>
+
+<ParamField body="topic" type="string" required>
+  The consent topic for this message, e.g. `account-security` or `promotions`. The contact must hold active SMS consent for this topic. If they do not, the send returns `status: "suppressed"` with `reason: "no_consent"`.
+</ParamField>
+
+<ParamField body="body" type="string">
+  The raw text of the message. Use this for simple, one-off sends. Mutually exclusive with `template`.
+</ParamField>
+
+<ParamField body="template" type="string">
+  The name of a published SMS template, e.g. `"order-confirmation"`. Lath selects the correct locale variant based on the contact's preferred language. Mutually exclusive with `body`.
+</ParamField>
+
+<ParamField body="variables" type="object">
+  Key-value pairs injected into template variable placeholders at render time, e.g. `{ "orderId": "ORD-8821", "total": "$42.00" }`. Has no effect when using `body` directly.
+</ParamField>
+
+<ParamField body="sendAfter" type="string">
+  An ISO 8601 datetime string that schedules the message for future delivery, e.g. `"2025-09-01T09:00:00Z"`. Quiet hours are re-evaluated at delivery time, not at scheduling time.
+</ParamField>
+
+<Note>
+  `body` and `template` are mutually exclusive. Use `body` for simple, dynamic sends where the copy is generated at runtime. Use `template` when you need locale support, consistent brand formatting, or the ability to update copy without a code deploy.
+</Note>
+
+## Response fields
+
+<ResponseField name="activityId" type="string">
+  A unique identifier for the platform activity. Use this for support queries and audit log lookups.
+</ResponseField>
+
+<ResponseField name="result.messageId" type="string">
+  UUID assigned to this message. Use it to query delivery status or correlate webhook events.
+</ResponseField>
+
+<ResponseField name="result.status" type="string">
+  Either `queued` — the message has been accepted for delivery — or `suppressed` — the send was blocked before queuing.
+</ResponseField>
+
+<ResponseField name="result.segments" type="integer">
+  The number of billing segments this message occupies. A GSM-7 message is 160 characters per segment; a UCS-2 message is 70 characters per segment.
+</ResponseField>
+
+<ResponseField name="result.encoding" type="string">
+  Either `gsm-7` or `ucs-2`. If your body contains characters outside the GSM-7 alphabet (emoji, certain accented characters), Lath switches to UCS-2, which increases cost per segment.
+</ResponseField>
+
+<ResponseField name="result.template" type="string | null">
+  The name of the template used to render this message, or `null` when a `body` string was provided directly.
+</ResponseField>
+
+<ResponseField name="result.templateVersion" type="integer | null">
+  The published version number of the template at the time of the send, or `null` when no template was used.
+</ResponseField>
+
+<ResponseField name="result.sendAfter" type="string | null">
+  The ISO 8601 datetime the message is scheduled to send, or `null` for immediate sends.
+</ResponseField>
+
+<ResponseField name="result.blocked" type="object | null">
+  Present only when `status` is `suppressed`. Contains `reason` (e.g. `"opted_out"`, `"no_consent"`, `"quiet_hours"`, `"registration_pending"`) and `fix` — a plain-language description of how to resolve the block.
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/sms/send \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: send-otp-u_01hx-1748293847" \
+  -d '{
+    "to": "+14155550100",
+    "topic": "account-security",
+    "body": "Your Lath code is 739201. Expires in 10 minutes. Do not share it."
+  }'
+```
+
+```typescript TypeScript SDK
+import { Lath } from "@trylath/sdk";
+
+const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+const { activityId, result } = await lath.sms.send({
+  to: "+14155550100",
+  topic: "account-security",
+  body: "Your Lath code is 739201. Expires in 10 minutes. Do not share it.",
+});
+
+if (result.status === "suppressed") {
+  console.error("Send blocked:", result.blocked?.reason, result.blocked?.fix);
+} else {
+  console.log(`Queued as ${result.messageId} — ${result.segments} segment(s), ${result.encoding}`);
+}
+```
+</CodeGroup>
+
+**Successful response:**
+
+```json
+{
+  "activityId": "act_01hx9z...",
+  "result": {
+    "messageId": "msg_01hx9z...",
+    "status": "queued",
+    "segments": 1,
+    "encoding": "gsm-7",
+    "template": null,
+    "templateVersion": null,
+    "sendAfter": null,
+    "blocked": null
+  }
+}
+```
+
+**Suppressed response:**
+
+```json
+{
+  "activityId": "act_01hxab...",
+  "result": {
+    "messageId": "msg_01hxab...",
+    "status": "suppressed",
+    "segments": 0,
+    "encoding": "gsm-7",
+    "template": null,
+    "templateVersion": null,
+    "sendAfter": null,
+    "blocked": {
+      "reason": "opted_out",
+      "fix": "The contact replied STOP. They must reply START to re-grant SMS consent before you can send to this number."
+    }
+  }
+}
+```
+
+## Quiet hours
+
+If the recipient's phone number resolves to a timezone where the current local time falls inside your configured quiet window, the send is held and delivered automatically when the window opens. The API still returns `status: "queued"` — delivery is deferred, not dropped. Configure quiet hours in the dashboard under **SMS → Settings → Quiet Hours**.
+
+<Tip>
+  Use `sendAfter` in combination with quiet hours to schedule promotional sends for optimal engagement times. If `sendAfter` lands in a quiet window, the message waits until the window closes rather than being dropped.
+</Tip>
+
+---
+
+## SMS templates
+
+SMS templates let you define reusable message copy with locale variants and injected variables. This is the right choice when you send the same message in multiple languages or want to update copy without touching your application code.
+
+**Create a template** with `POST /v1/sms/template/set`, then **publish it** with `POST /v1/sms/template/publish` before it can be referenced in a send.
+
+<CodeGroup>
+```bash Create template (cURL)
+curl -X POST https://platform.trylath.com/v1/sms/template/set \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "order-shipped",
+    "locales": {
+      "en": {
+        "body": "Hi {{firstName}}, your order {{orderId}} has shipped and will arrive by {{deliveryDate}}."
+      },
+      "es": {
+        "body": "Hola {{firstName}}, tu pedido {{orderId}} ha sido enviado y llegará antes del {{deliveryDate}}."
+      }
+    }
+  }'
+```
+
+```typescript Create template (TypeScript SDK)
+await lath.sms.template.set({
+  name: "order-shipped",
+  locales: {
+    en: {
+      body: "Hi {{firstName}}, your order {{orderId}} has shipped and will arrive by {{deliveryDate}}.",
+    },
+    es: {
+      body: "Hola {{firstName}}, tu pedido {{orderId}} ha sido enviado y llegará antes del {{deliveryDate}}.",
+    },
+  },
+});
+
+await lath.sms.template.publish({ name: "order-shipped" });
+```
+</CodeGroup>
+
+Once published, reference the template by name in your send call:
+
+```typescript
+await lath.sms.send({
+  to: "+14155550100",
+  topic: "order-updates",
+  template: "order-shipped",
+  variables: {
+    firstName: "Maria",
+    orderId: "ORD-4421",
+    deliveryDate: "Thursday, June 5",
+  },
+});
+```
+
+Lath automatically selects the correct locale variant based on the contact's preferred language setting. If no matching locale exists, the template falls back to `en`.

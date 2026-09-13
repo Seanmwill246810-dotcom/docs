@@ -1,0 +1,118 @@
+---
+title: "SMS Keywords: STOP, START, and HELP Reply Automation"
+sidebarTitle: "Keywords"
+description: "Lath automatically handles STOP, HELP, and START replies. STOP revokes SMS consent, START re-grants it, and HELP sends your configured help message."
+---
+
+Carrier regulations require that every SMS sender respond to STOP, HELP, and START keywords — failure to do so can result in number suspension or carrier filtering. Lath handles all three automatically. When a contact replies with a regulated keyword, Lath processes it, updates the contact's consent record, and sends the appropriate reply — no webhook logic or manual intervention required on your end.
+
+<Note>
+  You don't need to build any webhook logic to handle STOP or START. Lath intercepts inbound keyword replies, updates the contact's consent record in real time, and sends the compliant auto-reply. Your application is notified via the normal webhook event stream if you need to react downstream.
+</Note>
+
+## STOP
+
+When a contact replies `STOP` to any of your numbers, Lath immediately:
+
+1. Revokes the contact's SMS consent for all **marketing** topics.
+2. Sends a carrier-compliant confirmation reply to the contact.
+3. Records the opt-out event in the contact's consent history.
+
+Any subsequent send to that contact's number on a marketing topic returns:
+
+```json
+{
+  "result": {
+    "status": "suppressed",
+    "blocked": {
+      "reason": "opted_out",
+      "fix": "The contact replied STOP. They must reply START to re-grant SMS consent."
+    }
+  }
+}
+```
+
+<Warning>
+  Transactional topics — those marked as transactional in your consent settings — are **not** affected by a STOP reply. Critical messages such as one-time codes, account alerts, and order confirmations continue to be delivered even after a contact opts out of marketing SMS.
+</Warning>
+
+## START
+
+When a contact who previously sent `STOP` replies `START`, Lath:
+
+1. Re-grants the contact's SMS consent for marketing topics.
+2. Sends a carrier-compliant confirmation reply.
+3. Records the opt-in event in the contact's consent history.
+
+Subsequent sends to that contact on marketing topics resume normally. No action is needed from your application.
+
+## HELP
+
+When a contact replies `HELP`, Lath sends your configured help message. Configure the HELP response via `POST /v1/sms/keyword/set`:
+
+```bash
+curl -X POST https://platform.trylath.com/v1/sms/keyword/set \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyword": "HELP",
+    "body": "Acme Alerts: Reply STOP to opt out. For support visit acme.com/help or call 1-800-555-0199."
+  }'
+```
+
+<Tip>
+  Carrier guidelines recommend that your HELP reply includes your brand name, a support contact method, and a reminder that STOP unsubscribes the user. Keep it under 160 characters to avoid multi-segment billing.
+</Tip>
+
+## Custom keywords
+
+Beyond the three regulated keywords, you can define custom keyword handlers for any inbound reply. Use `POST /v1/sms/keyword/set` with the keyword and the auto-reply body:
+
+```bash
+curl -X POST https://platform.trylath.com/v1/sms/keyword/set \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyword": "INFO",
+    "body": "Thanks for reaching out! Visit acme.com/info for details about our service."
+  }'
+```
+
+Custom keywords match case-insensitively on the full message body (trimmed of whitespace). They do not alter consent records — only STOP and START affect consent.
+
+## Consent audit trail
+
+Every STOP and START event is recorded in the contact's consent history alongside channel-level consent changes. Retrieve the full history with `POST /v1/audience/consent/history`:
+
+```bash
+curl -X POST https://platform.trylath.com/v1/audience/consent/history \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contactId": "con_01hx9z..."
+  }'
+```
+
+Each entry in the history includes:
+
+<ResponseField name="channel" type="string">
+  The channel affected — `sms` for STOP/START events.
+</ResponseField>
+
+<ResponseField name="topic" type="string">
+  The topic whose consent status changed, or `"*"` when all marketing topics are affected by a STOP.
+</ResponseField>
+
+<ResponseField name="direction" type="string">
+  Either `granted` (START) or `revoked` (STOP).
+</ResponseField>
+
+<ResponseField name="source" type="string">
+  How the change was triggered — `keyword_reply` for STOP/START inbound messages, `api` for programmatic changes.
+</ResponseField>
+
+<ResponseField name="timestamp" type="string">
+  ISO 8601 datetime of when the event occurred.
+</ResponseField>
+
+This audit trail is useful for compliance reporting and for debugging why a send was suppressed.

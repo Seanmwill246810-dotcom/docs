@@ -1,0 +1,260 @@
+---
+title: "SMS Template Endpoints: Create, Publish, and Manage"
+sidebarTitle: "SMS Templates"
+description: "REST endpoints to create, update, and publish SMS templates with variable substitution, multiple locales, and a versioned draft/publish lifecycle."
+---
+
+SMS templates in Lath work the same draft/publish lifecycle as email templates. You write the message body with `{{ variable }}` placeholders, save it as a draft, then publish when it is ready to send. Published templates are versioned — messages already queued against a template always render against the version that was live when they were accepted. Templates support multiple locales so your send logic stays language-agnostic.
+
+## POST /v1/sms/template/set
+
+Create a new SMS template or update the draft of an existing one for a given locale.
+
+### Request
+
+<ParamField body="name" type="string" required>
+  Unique template identifier within your project (e.g. `"shipment-update"`). Use lowercase kebab-case.
+</ParamField>
+
+<ParamField body="body" type="string" required>
+  The message text. Use `{{ variableName }}` syntax for substitution. Keep the final rendered text under 1600 characters to avoid excessive segmentation.
+</ParamField>
+
+<ParamField body="locale" type="string">
+  BCP 47 locale tag for this variant (e.g. `"en"`, `"es"`, `"fr"`). Defaults to `"en"`.
+</ParamField>
+
+<ParamField body="variables" type="array">
+  Array of variable name strings declared in this template (e.g. `["orderNumber", "trackingUrl"]`). Used for validation at send time.
+</ParamField>
+
+### Response
+
+<ResponseField name="template.name" type="string">
+  The template name as stored.
+</ResponseField>
+
+<ResponseField name="template.locale" type="string">
+  The locale this variant targets.
+</ResponseField>
+
+<ResponseField name="template.version" type="integer">
+  The new draft version number.
+</ResponseField>
+
+<ResponseField name="template.status" type="string">
+  Always `"draft"` after a `set` call.
+</ResponseField>
+
+<ResponseField name="template.segments" type="integer">
+  Estimated number of SMS segments the template body will occupy (assuming all variables are empty strings). Useful for cost planning.
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/sms/template/set \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "shipment-update",
+    "body": "Hi! Your order {{ orderNumber }} has shipped. Track it here: {{ trackingUrl }}",
+    "locale": "en",
+    "variables": ["orderNumber", "trackingUrl"]
+  }'
+```
+
+```typescript TypeScript SDK
+import { LathClient } from "@trylath/sdk";
+
+const lath = new LathClient({ apiKey: process.env.LATH_SECRET_KEY });
+
+const { result } = await lath.sms.templates.set({
+  name: "shipment-update",
+  body: "Hi! Your order {{ orderNumber }} has shipped. Track it here: {{ trackingUrl }}",
+  locale: "en",
+  variables: ["orderNumber", "trackingUrl"],
+});
+
+console.log("Draft version:", result.template.version);
+console.log("Estimated segments:", result.template.segments);
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/sms/template/publish
+
+Promote the current draft to the published version. Only published templates can be referenced in `/v1/sms/send`.
+
+### Request
+
+<ParamField body="name" type="string" required>
+  Name of the template to publish.
+</ParamField>
+
+<ParamField body="locale" type="string">
+  Locale variant to publish. Omit to publish all locales simultaneously.
+</ParamField>
+
+### Response
+
+<ResponseField name="template.name" type="string">
+  The template name.
+</ResponseField>
+
+<ResponseField name="template.publishedVersion" type="integer">
+  The version number that is now live.
+</ResponseField>
+
+<ResponseField name="template.publishedAt" type="string">
+  ISO 8601 timestamp of when the template was published.
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/sms/template/publish \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "shipment-update", "locale": "en" }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.sms.templates.publish({
+  name: "shipment-update",
+  locale: "en",
+});
+
+console.log("Now live at version:", result.template.publishedVersion);
+```
+
+</CodeGroup>
+
+<Warning>
+  Attempting to publish a template with no draft content returns a `400` error. Call `/v1/sms/template/set` first.
+</Warning>
+
+---
+
+## POST /v1/sms/template/get
+
+Retrieve the draft and published content for an SMS template variant.
+
+### Request
+
+<ParamField body="name" type="string" required>
+  Template name to retrieve.
+</ParamField>
+
+<ParamField body="locale" type="string">
+  Locale to fetch. Defaults to `"en"`.
+</ParamField>
+
+### Response
+
+Returns an object with `draft` and `published` keys. Each contains `body`, `variables`, `version`, `segments`, and `updatedAt`. Either key may be `null` if that state does not exist.
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/sms/template/get \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "shipment-update", "locale": "en" }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.sms.templates.get({
+  name: "shipment-update",
+  locale: "en",
+});
+
+console.log("Published body:", result.published?.body);
+console.log("Draft segments:", result.draft?.segments);
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/sms/template/list
+
+List all SMS templates in your project.
+
+### Request
+
+This endpoint takes no request body.
+
+### Response
+
+Returns `{ templates: [{ name, locales, publishedVersion, draftVersion, segments }] }`.
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/sms/template/list \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.sms.templates.list();
+
+for (const tpl of result.templates) {
+  console.log(`${tpl.name} — locales: ${tpl.locales.join(", ")}`);
+}
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/sms/template/delete
+
+Delete an SMS template variant. Removes both draft and published versions for the specified locale.
+
+### Request
+
+<ParamField body="name" type="string" required>
+  Template name to delete.
+</ParamField>
+
+<ParamField body="locale" type="string">
+  Locale variant to delete. Omit to delete the template and all locale variants.
+</ParamField>
+
+<Warning>
+  Deleting a published template does not recall messages already queued against it. Future `/v1/sms/send` calls referencing the deleted template name will return a `404` error.
+</Warning>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/sms/template/delete \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "shipment-update", "locale": "en" }'
+```
+
+```typescript TypeScript SDK
+await lath.sms.templates.delete({ name: "shipment-update", locale: "en" });
+```
+
+</CodeGroup>
+
+---
+
+## Variable syntax
+
+Use `{{ variableName }}` placeholders in your `body` string. Variable names must be declared in the `variables` array when calling `set`. At send time, Lath validates that all declared variables are present in the `variables` object passed to `/v1/sms/send`.
+
+```text
+Hi! Your order {{ orderNumber }} has shipped. Track it: {{ trackingUrl }}
+```
+
+<Tip>
+  Check the `segments` field returned by `/set` and `/get` to estimate your per-message cost before publishing. A 1-segment GSM-7 message is significantly cheaper than a 2-segment UCS-2 message.
+</Tip>

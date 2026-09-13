@@ -1,0 +1,116 @@
+---
+title: "Lath SMS Carrier Registration and 10DLC Setup Guide"
+sidebarTitle: "Registration"
+description: "File a carrier registration before sending SMS in production. Lath stores messages during review and delivers them automatically once approved."
+---
+
+US carriers require senders to register their phone number and intended use case before messages are delivered at volume. This requirement — known as 10DLC (10-digit long code) registration for A2P messaging — applies to marketing sends and most transactional use cases. Without an approved registration, carriers silently filter or block messages at the network level. Lath manages the entire registration process for you: you provide the information, Lath files it with the appropriate carrier networks and tracks approval status.
+
+<Info>
+  Test-mode sends (`lath_test_sk…`) bypass carrier registration entirely. You can send to any number in the test environment without filing a registration. No carrier approval is needed during development.
+</Info>
+
+## Check your registration status
+
+Before sending in production, confirm your registration status with `POST /v1/sms/registration/get`:
+
+```bash
+curl -X POST https://platform.trylath.com/v1/sms/registration/get \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+The response includes a `status` field with one of the following values:
+
+<ResponseField name="status" type="string">
+
+  <Accordion title="not_started">
+    No registration has been filed for this project. Production sends will be suppressed until you initiate registration from the dashboard under **SMS → Registration**.
+  </Accordion>
+
+  <Accordion title="pending">
+    Your registration has been submitted and is awaiting carrier review. Sends are stored during this period and delivered automatically once approval is granted — no messages are lost.
+  </Accordion>
+
+  <Accordion title="approved">
+    Registration is active. Your number is cleared for delivery at the approved volume tier.
+  </Accordion>
+
+  <Accordion title="rejected">
+    The registration was rejected by the carrier network. Review the `rejectionReason` field in the response, correct the information in the dashboard, and resubmit.
+  </Accordion>
+
+</ResponseField>
+
+## Sends during pending or unregistered status
+
+While your registration is `pending` or `not_started`, any production send returns `status: "suppressed"` with a `blocked` object:
+
+```json
+{
+  "activityId": "act_01hxab...",
+  "result": {
+    "messageId": "msg_01hxab...",
+    "status": "suppressed",
+    "blocked": {
+      "reason": "registration_pending",
+      "fix": "Your 10DLC registration is under carrier review. Your message has been stored and will be delivered automatically once registration is approved."
+    }
+  }
+}
+```
+
+<Note>
+  Nothing is lost while registration is pending. Lath stores every suppressed send and delivers the full queue once your registration transitions to `approved`. You do not need to retry sends manually.
+</Note>
+
+## Your assigned numbers
+
+Numbers are provisioned automatically when you create an SMS-capable project in Lath. List your assigned numbers with `POST /v1/sms/number/list`:
+
+```bash
+curl -X POST https://platform.trylath.com/v1/sms/number/list \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+Each number entry includes the E.164 number, its type (`long_code` or `toll_free`), and the capabilities enabled on it (`sms`, `mms`).
+
+## What registration covers
+
+<CardGroup cols={2}>
+  <Card title="10DLC (Long Code)" icon="hashtag">
+    Required for US A2P (application-to-person) messaging on 10-digit local numbers. Covers both marketing and transactional use cases. Submit your brand and campaign details via the Lath dashboard.
+  </Card>
+  <Card title="Toll-Free Verification" icon="phone">
+    Toll-free numbers (8XX) require a separate verification process with carriers. Lath supports toll-free verification through the same registration flow — select **Toll-Free** when initiating registration.
+  </Card>
+</CardGroup>
+
+## Timeline and tips
+
+Carrier approval typically takes **2–5 business days** after all required information is submitted. To avoid delays:
+
+<Steps>
+  <Step title="Complete your brand profile">
+    In the Lath dashboard under **SMS → Registration**, fill in your legal business name, EIN (for US entities), website, and vertical. Incomplete brand profiles are the most common cause of rejection.
+  </Step>
+  <Step title="Define your campaign use case">
+    Select the use case that best matches your sends — for example, `2FA / OTP`, `Customer Care`, or `Marketing`. Each use case has different throughput limits and compliance requirements.
+  </Step>
+  <Step title="Add sample messages">
+    Carriers require 2–3 sample messages that represent what you'll actually send. Use real examples, not placeholders.
+  </Step>
+  <Step title="Confirm opt-in method">
+    Describe how contacts consent to receive your messages (e.g., web form, checkout flow). Carriers verify that your opt-in method is TCPA-compliant.
+  </Step>
+  <Step title="Submit and monitor">
+    Submit the registration from the dashboard. Lath will notify you by email and webhook event when the status changes. Check `POST /v1/sms/registration/get` at any time for the current state.
+  </Step>
+</Steps>
+
+<Warning>
+  Reusing a rejected registration without correcting the underlying issue will result in a second rejection and may delay your approval further. Read the `rejectionReason` carefully before resubmitting.
+</Warning>

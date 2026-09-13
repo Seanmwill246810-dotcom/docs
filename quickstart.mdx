@@ -1,0 +1,206 @@
+---
+title: "Create Your Lath Account and Send Your First Message"
+sidebarTitle: "Quickstart"
+description: "Create a Lath account, get your API keys, set a monthly spending cap, and send your first email or SMS in under 10 minutes. No card needed."
+---
+
+This guide walks you through everything you need to go from zero to your first successful email or SMS send. You'll create an account, retrieve your API keys, set a spending cap to protect against runaway costs, and make your first API call — all in under 10 minutes. No credit card is required to get started.
+
+<Note>
+  Live keys (`lath_live_sk…`) send real messages to real recipients and incur charges. Test keys (`lath_test_sk…`) are completely safe for development — they exercise the same code paths but never deliver messages or touch your billing balance.
+</Note>
+
+<Steps>
+  <Step title="Create your account">
+    Sign up by calling `POST /v1/account/signup` with your email address and country code. No payment details are required at this stage.
+
+    <CodeGroup>
+      ```bash cURL
+      curl -s -X POST https://platform.trylath.com/v1/account/signup \
+        -H "Content-Type: application/json" \
+        -d '{"email":"you@example.com","country":"US"}'
+      ```
+
+      ```ts TypeScript
+      import Lath from "@trylath/sdk";
+
+      // No auth required for signup
+      const response = await fetch("https://platform.trylath.com/v1/account/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "you@example.com", country: "US" }),
+      });
+
+      const { activityId, result } = await response.json();
+      ```
+    </CodeGroup>
+
+    The response contains your account and project IDs, plus four API keys — a secret and a publishable key for each environment:
+
+    ```json
+    {
+      "activityId": "act_01j…",
+      "result": {
+        "accountId": "acc_01j…",
+        "projectId": "proj_01j…",
+        "live": {
+          "key": "lath_live_sk…",
+          "publishableKey": "lath_live_pk…"
+        },
+        "test": {
+          "key": "lath_test_sk…",
+          "publishableKey": "lath_test_pk…"
+        }
+      }
+    }
+    ```
+
+    Store your secret keys securely — you won't be able to retrieve them again in full. The `live.key` and `test.key` values are your server-side secret keys. The `publishableKey` values are safe to embed in browser or mobile clients.
+  </Step>
+
+  <Step title="Set a spending cap">
+    Lath requires a monthly spending cap before it will deliver any live messages. This protects you from unexpected charges caused by loops, misconfigured automations, or compromised keys. Set the cap by calling `POST /v1/billing/cap/set` with a `monthlyCapCents` value.
+
+    <CodeGroup>
+      ```bash cURL
+      curl -s -X POST https://platform.trylath.com/v1/billing/cap/set \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $LATH_SECRET_KEY" \
+        -d '{"monthlyCapCents": 5000}'
+      ```
+
+      ```ts TypeScript
+      import Lath from "@trylath/sdk";
+
+      const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+      const { activityId, result } = await lath.billing.cap.set({
+        monthlyCapCents: 5000, // $50.00 USD
+      });
+      ```
+    </CodeGroup>
+
+    ```json
+    {
+      "activityId": "act_01j…",
+      "result": {
+        "monthlyCapCents": 5000,
+        "updatedAt": "2024-01-15T10:30:00Z"
+      }
+    }
+    ```
+
+    <Tip>
+      Start with a conservative cap (e.g. `5000` = $50.00 USD) and increase it once you're confident in your integration. You can update the cap at any time with another call to `POST /v1/billing/cap/set`.
+    </Tip>
+  </Step>
+
+  <Step title="Send your first message">
+    With your keys and spending cap in place, you're ready to send. Choose the channel that fits your use case:
+
+    <Tabs>
+      <Tab title="Email">
+        Call `POST /v1/email/send` to send a transactional email. You must supply a `to` address, a `template` identifier, a `topic` (used for consent and unsubscribe grouping), and a `from` address that you've verified in the dashboard.
+
+        <CodeGroup>
+          ```bash cURL
+          curl -s -X POST https://platform.trylath.com/v1/email/send \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $LATH_SECRET_KEY" \
+            -d '{
+              "to": "recipient@example.com",
+              "from": "hello@yourapp.com",
+              "template": "tmpl_welcome_01j…",
+              "topic": "transactional"
+            }'
+          ```
+
+          ```ts TypeScript
+          import Lath from "@trylath/sdk";
+
+          const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+          const { activityId, result } = await lath.email.send({
+            to: "recipient@example.com",
+            from: "hello@yourapp.com",
+            template: "tmpl_welcome_01j…",
+            topic: "transactional",
+          });
+          ```
+        </CodeGroup>
+      </Tab>
+      <Tab title="SMS">
+        Call `POST /v1/sms/send` to send an SMS. Supply the recipient's E.164 phone number, the message body, and a `topic` for consent grouping.
+
+        <CodeGroup>
+          ```bash cURL
+          curl -s -X POST https://platform.trylath.com/v1/sms/send \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $LATH_SECRET_KEY" \
+            -d '{
+              "to": "+15550001234",
+              "body": "Your verification code is 482910. Valid for 10 minutes.",
+              "topic": "transactional"
+            }'
+          ```
+
+          ```ts TypeScript
+          import Lath from "@trylath/sdk";
+
+          const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+          const { activityId, result } = await lath.sms.send({
+            to: "+15550001234",
+            body: "Your verification code is 482910. Valid for 10 minutes.",
+            topic: "transactional",
+          });
+          ```
+        </CodeGroup>
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Check the response">
+    Every Lath response follows the same shape: `{ activityId, result }`. For email and SMS sends, `result` includes the fields you need to track delivery:
+
+    ```json
+    {
+      "activityId": "act_01j…",
+      "result": {
+        "messageId": "msg_01j…",
+        "status": "queued",
+        "to": "recipient@example.com",
+        "sentAt": "2024-01-15T10:31:00Z"
+      }
+    }
+    ```
+
+    | Field | Description |
+    |---|---|
+    | `activityId` | Unique ID for this API call. Use it to look up the full event log in the dashboard or via `POST /v1/developers/activity/get`. |
+    | `messageId` | Unique ID for the message itself. Use it to query delivery status or correlate webhook events. |
+    | `status` | `queued` means the message passed all policy gates and is being delivered. `suppressed` means a policy gate blocked the send — check `blocked.reason` for details. |
+    | `blocked.reason` | Present when `status` is `suppressed`. Values include `no_consent`, `revoked`, `suppression_list`, `spending_cap_reached`, and `quiet_hours`. |
+
+    <Warning>
+      A `status` of `suppressed` means a policy gate blocked the send before it left Lath. Check `blocked.reason` to determine whether the recipient has opted out (`no_consent` or `revoked`), whether your spending cap has been reached (`spending_cap_reached`), or whether the address is on a suppression list (`suppression_list`). No charge is incurred for suppressed messages.
+    </Warning>
+  </Step>
+</Steps>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="key" href="/authentication">
+    Learn about secret vs publishable keys, scoped permissions, and how to rotate keys safely.
+  </Card>
+  <Card title="Contacts & Consent" icon="address-book" href="/concepts/contacts">
+    Understand how the unified contact record works and how to manage per-channel consent.
+  </Card>
+  <Card title="Email Templates" icon="file-lines" href="/email/templates">
+    Create reusable, multi-language email templates with dynamic variables and fallback locales.
+  </Card>
+  <Card title="SMS Keywords" icon="shield-check" href="/sms/keywords">
+    Learn about quiet hours, STOP/HELP/START keyword handling, and carrier registration requirements.
+  </Card>
+</CardGroup>

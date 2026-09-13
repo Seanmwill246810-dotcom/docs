@@ -1,0 +1,215 @@
+---
+title: "Receive and Verify Real-Time Lath Webhook Deliveries"
+sidebarTitle: "Webhooks"
+description: "Register HTTPS endpoints to receive email, SMS, auth, and consent events. Verify each delivery with HMAC-SHA256 signatures and replay-attack protection."
+---
+
+Lath sends `POST` requests to your registered HTTPS endpoints whenever notable events occur in your account — an email bounces, a contact replies STOP to an SMS, a user completes sign-in, and so on. Webhooks let your application react to these events in real time without polling the API. Register as many endpoints as you need, each subscribed to the specific event types that matter to that service.
+
+## Create a webhook endpoint
+
+Send `POST /v1/developers/webhook/create` to register a new endpoint.
+
+<ParamField body="url" type="string" required>
+  The full HTTPS URL Lath should POST events to. Plain HTTP URLs are rejected.
+</ParamField>
+
+<ParamField body="events" type="array of strings" required>
+  The event types this endpoint should receive. Pass `["*"]` to subscribe to all events. See the event catalogue below for available values.
+</ParamField>
+
+<ParamField body="name" type="string">
+  An optional human-readable label for the endpoint, e.g. `"crm-sync"`.
+</ParamField>
+
+```bash
+curl -X POST https://platform.trylath.com/v1/developers/webhook/create \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: register-crm-webhook-01" \
+  -d '{
+    "url": "https://yourapp.com/webhooks/lath",
+    "events": ["email.delivered", "email.bounced", "sms.opted_out"],
+    "name": "crm-sync"
+  }'
+```
+
+## Event catalogue
+
+| Event | When it fires |
+|---|---|
+| `email.delivered` | Email confirmed delivered to the recipient's inbox |
+| `email.bounced` | Hard bounce recorded — address is likely invalid |
+| `email.complained` | Recipient filed a spam complaint |
+| `sms.delivered` | SMS delivered to the recipient's handset |
+| `sms.opted_out` | Contact replied STOP — consent revoked automatically |
+| `sms.opted_in` | Contact replied START — consent reinstated |
+| `auth.signed_in` | User completed a sign-in flow (any method) |
+| `audience.consent.changed` | Any consent grant or revoke on a contact record |
+
+<Note>
+  New event types are added as Lath ships new features. Subscribe to `["*"]` in a logging endpoint to capture everything, then refine subscriptions per service as you identify what each one needs.
+</Note>
+
+## Payload shape
+
+Every webhook delivery is a `POST` with a JSON body and `Content-Type: application/json`. The top-level shape is consistent across all event types; the `data` object contains fields specific to that event.
+
+```json
+{
+  "id": "evt_01hx9k3m4e6p7qr8st",
+  "type": "email.delivered",
+  "createdAt": "2024-01-15T16:12:00Z",
+  "data": {
+    "messageId": "msg_...",
+    "contactId": "cnt_...",
+    "email": "user@example.com",
+    "template": "welcome"
+  }
+}
+```
+
+<ResponseField name="id" type="string">
+  A unique identifier for this event. Use this to deduplicate deliveries — Lath may deliver the same event more than once during retries.
+</ResponseField>
+
+<ResponseField name="type" type="string">
+  The event type string, e.g. `"email.delivered"`.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string (ISO 8601)">
+  The UTC timestamp when the event occurred.
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  Event-specific payload. Fields vary by event type.
+</ResponseField>
+
+## Verifying signatures
+
+Every delivery includes two headers that let you confirm the request came from Lath and was not replayed.
+
+| Header | Contains |
+|---|---|
+| `Lath-Timestamp` | Unix timestamp (seconds) of the delivery attempt |
+| `Lath-Signature` | `v1=<hex>` — HMAC-SHA256 of `{timestamp}.{body}` using your endpoint's signing secret |
+
+Retrieve your endpoint's signing secret from the response to `POST /v1/developers/webhook/create` (field `result.signingSecret`) — it is only shown once.
+
+<Steps>
+  <Step title="Read the headers">
+    Extract `Lath-Timestamp` and `Lath-Signature` from the incoming request.
+  </Step>
+  <Step title="Build the signed payload">
+    Concatenate the timestamp, a literal `.`, and the raw (unparsed) request body: `"${timestamp}.${rawBody}"`.
+  </Step>
+  <Step title="Compute the expected signature">
+    HMAC-SHA256 the concatenated string with your signing secret.
+  </Step>
+  <Step title="Compare and reject on mismatch">
+    Compare `v1=${computed}` to the `Lath-Signature` header using a timing-safe equality check. Return `400` if they don't match.
+  </Step>
+  <Step title="Check the timestamp">
+    Reject requests where the timestamp is more than 5 minutes old to prevent replay attacks.
+  </Step>
+</Steps>
+
+<CodeGroup>
+
+```typescript TypeScript
+import { createHmac, timingSafeEqual } from 'crypto';
+
+function verifyWebhook(
+  payload: string,
+  timestamp: string,
+  signature: string,
+  secret: string,
+): boolean {
+  const signed = `${timestamp}.${payload}`;
+  const expected = `v1=${createHmac('sha256', secret).update(signed).digest('hex')}`;
+
+  // Reject stale deliveries (> 5 minutes)
+  const age = Math.floor(Date.now() / 1000) - parseInt(timestamp, 10);
+  if (age > 300) return false;
+
+  // Timing-safe comparison
+  return timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+}
+```
+
+```python Python
+import hashlib
+import hmac
+import time
+
+def verify_webhook(payload: str, timestamp: str, signature: str, secret: str) -> bool:
+    signed = f"{timestamp}.{payload}"
+    expected = "v1=" + hmac.new(
+        secret.encode(), signed.encode(), hashlib.sha256
+    ).hexdigest()
+
+    # Reject stale deliveries (> 5 minutes)
+    age = int(time.time()) - int(timestamp)
+    if age > 300:
+        return False
+
+    return hmac.compare_digest(expected, signature)
+```
+
+</CodeGroup>
+
+<Warning>
+  Always verify signatures before processing a webhook payload. Without verification, any party can POST arbitrary data to your endpoint and trigger unintended side effects.
+</Warning>
+
+## Retries and delivery attempts
+
+If your endpoint returns any non-2xx status code — or doesn't respond within 10 seconds — Lath marks the delivery as failed and retries on a backoff schedule:
+
+| Attempt | Delay after previous failure |
+|---|---|
+| 1 | 1 minute |
+| 2 | 5 minutes |
+| 3 | 30 minutes |
+| 4 | 2 hours |
+| 5 | 12 hours |
+| 6 | 24 hours |
+
+After 6 failed attempts the delivery is abandoned. Use `POST /v1/developers/webhook/delivery/list` to inspect recent attempts and their response codes.
+
+<Tip>
+  Respond with `200` as quickly as possible, then process the event asynchronously. If your handler does meaningful work synchronously (database writes, outbound API calls) it may time out under load, causing spurious retries.
+</Tip>
+
+## Manage endpoints
+
+<Accordion title="List webhook endpoints">
+  `POST /v1/developers/webhook/list` returns all registered endpoints — their IDs, URLs, subscribed event types, and creation timestamps.
+
+  ```bash
+  curl -X POST https://platform.trylath.com/v1/developers/webhook/list \
+    -H "Authorization: Bearer $LATH_SECRET_KEY"
+  ```
+</Accordion>
+
+<Accordion title="Delete a webhook endpoint">
+  `POST /v1/developers/webhook/delete` removes an endpoint permanently. Pass the `webhookId` from the list response.
+
+  ```bash
+  curl -X POST https://platform.trylath.com/v1/developers/webhook/delete \
+    -H "Authorization: Bearer $LATH_SECRET_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{ "webhookId": "wh_..." }'
+  ```
+</Accordion>
+
+<Accordion title="View delivery history">
+  `POST /v1/developers/webhook/delivery/list` returns recent delivery attempts for a given endpoint, including the HTTP status code returned by your server and the full request body sent. Use this when debugging missing events.
+
+  ```bash
+  curl -X POST https://platform.trylath.com/v1/developers/webhook/delivery/list \
+    -H "Authorization: Bearer $LATH_SECRET_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{ "webhookId": "wh_..." }'
+  ```
+</Accordion>

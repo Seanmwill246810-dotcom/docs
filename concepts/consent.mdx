@@ -1,0 +1,205 @@
+---
+title: "Consent Management: How Lath Tracks Opt-Ins and Opt-Outs"
+sidebarTitle: "Consent"
+description: "Lath checks consent before every send — per contact, per topic, and per channel. SMS STOP keywords and email unsubscribes are handled automatically."
+---
+
+Lath enforces consent before every send — not as an optional compliance layer, but as a first-class gate built into the delivery pipeline. When you send an email or SMS, Lath looks up the contact's consent record for the message's topic and channel. If consent isn't present or has been revoked, the send is suppressed and you get a clear reason back. You never have to filter your audience manually.
+
+## How consent is structured
+
+### Topics
+
+Consent is organized around **topics** — string identifiers you define that describe the category of communication. For example:
+
+| Topic | Example use |
+|-------|-------------|
+| `order-updates` | Shipping confirmations, delivery notifications |
+| `product-news` | Feature announcements, newsletters |
+| `security-alerts` | Login codes, suspicious activity notices |
+| `billing-notices` | Invoice emails, payment failures |
+| `promotions` | Discount offers, seasonal campaigns |
+
+A topic is just a string — there's no registration step. Define topics that map to the categories your contacts care about, and pass the same string consistently when you send and when you record consent.
+
+### Channels
+
+Consent is tracked **separately for email and SMS**. A contact who unsubscribes from email marketing still has their SMS consent intact, and vice versa. This means you can honour channel-level preferences without any extra filtering logic on your side.
+
+### Transactional vs marketing
+
+Mark a topic as **transactional** when the message is necessary for the service — security alerts, password resets, order confirmations. Transactional topics bypass STOP and unsubscribe signals. Marketing topics respect them.
+
+<Warning>
+  Always pass a `topic` on every send. Sends without a valid consent grant for that topic and channel will be suppressed with `status: "suppressed"`. Do not use a catch-all topic to avoid this check — that defeats the purpose of consent management and may violate applicable regulations.
+</Warning>
+
+---
+
+## How consent is checked
+
+Before Lath queues any outbound message, it evaluates the contact's consent record for the combination of `topic` + `channel`. There are three possible outcomes:
+
+<Accordion title="Granted — message is queued">
+  The contact has an active consent grant for this topic and channel. Lath proceeds with delivery.
+</Accordion>
+
+<Accordion title="Not granted — message is suppressed">
+  No grant exists. Lath returns `status: "suppressed"` with `blocked.reason: "no_consent"`. Nothing is sent and nothing is charged.
+</Accordion>
+
+<Accordion title="Revoked — message is suppressed">
+  The contact previously held consent but has since unsubscribed or sent STOP. Lath returns `status: "suppressed"` with `blocked.reason: "revoked"`. For SMS, this happens automatically when a STOP keyword is received.
+</Accordion>
+
+A suppressed response looks like this:
+
+```json
+{
+  "activityId": "act_01hx...",
+  "result": {
+    "status": "suppressed",
+    "blocked": {
+      "reason": "revoked",
+      "topic": "product-news",
+      "channel": "email"
+    }
+  }
+}
+```
+
+---
+
+## Granting consent
+
+Call `POST /v1/audience/consent/grant` to record that a contact has opted in to a topic on a given channel. Do this when a user checks a box on your signup form, confirms a preference in your app, or submits the hosted preference page.
+
+<ParamField body="contactId" type="string" required>
+  The ID of the contact granting consent.
+</ParamField>
+
+<ParamField body="topic" type="string" required>
+  The topic the contact is opting in to (e.g., `"product-news"`).
+</ParamField>
+
+<ParamField body="channel" type="string" required>
+  Either `"email"` or `"sms"`.
+</ParamField>
+
+<ParamField body="source" type="string">
+  A free-form label written to the audit log. Use it to record where consent was captured — for example, `"signup-form"`, `"checkout-checkbox"`, or `"preference-page"`. Recommended for compliance.
+</ParamField>
+
+<CodeGroup>
+
+```typescript TypeScript SDK
+import Lath from "@trylath/sdk";
+
+const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+await lath.audience.consent.grant({
+  contactId: "con_01hx...",
+  topic: "product-news",
+  channel: "email",
+  source: "signup-form",
+});
+```
+
+```bash REST (curl)
+curl -X POST https://platform.trylath.com/v1/audience/consent/grant \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contactId": "con_01hx...",
+    "topic": "product-news",
+    "channel": "email",
+    "source": "signup-form"
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## Revoking consent
+
+Call `POST /v1/audience/consent/revoke` when a contact opts out — for example, when they uncheck a preference in your app. The request shape is identical to the grant endpoint.
+
+<ParamField body="contactId" type="string" required>
+  The ID of the contact revoking consent.
+</ParamField>
+
+<ParamField body="topic" type="string" required>
+  The topic the contact is opting out of.
+</ParamField>
+
+<ParamField body="channel" type="string" required>
+  Either `"email"` or `"sms"`.
+</ParamField>
+
+<ParamField body="source" type="string">
+  A label for the audit log — for example, `"preference-page"` or `"sms-stop-keyword"`.
+</ParamField>
+
+<Note>
+  When a contact replies STOP to an SMS message, Lath automatically calls `consent.revoke` for the `sms` channel on your behalf. You don't need to handle inbound STOP keywords yourself. The same applies to START — a STOP followed by START re-grants consent automatically.
+</Note>
+
+<CodeGroup>
+
+```typescript TypeScript SDK
+await lath.audience.consent.revoke({
+  contactId: "con_01hx...",
+  topic: "product-news",
+  channel: "email",
+  source: "preference-page",
+});
+```
+
+```bash REST (curl)
+curl -X POST https://platform.trylath.com/v1/audience/consent/revoke \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contactId": "con_01hx...",
+    "topic": "product-news",
+    "channel": "email",
+    "source": "preference-page"
+  }'
+```
+
+</CodeGroup>
+
+---
+
+## Hosted preference page
+
+Lath generates a per-contact preference page URL where contacts can manage their own consent without you building any UI. The page lists every topic the contact has interacted with and lets them toggle each channel independently.
+
+The page inherits your account's theme tokens — brand colour, logo, and font — so it looks like a natural extension of your product.
+
+<Tip>
+  Add the preference page link to your email footers as your unsubscribe link. Directing contacts there gives them channel-level and topic-level control, which reduces full unsubscribes compared to a single opt-out link.
+</Tip>
+
+Retrieve the URL for a given contact using `POST /v1/audience/contact/preferenceUrl`:
+
+<CodeGroup>
+
+```typescript TypeScript SDK
+const { result } = await lath.audience.contact.preferenceUrl({
+  contactId: "con_01hx...",
+});
+
+console.log(result.url);
+// https://prefs.trylath.com/p/con_01hx...?token=...
+```
+
+```bash REST (curl)
+curl -X POST https://platform.trylath.com/v1/audience/contact/preferenceUrl \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "contactId": "con_01hx..." }'
+```
+
+</CodeGroup>

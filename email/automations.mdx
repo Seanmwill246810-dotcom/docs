@@ -1,0 +1,246 @@
+---
+title: "Creating Email Automations with Branching and Delays in Lath"
+sidebarTitle: "Automations"
+description: "Lath automations are sequences of send, wait, branch, and property-set steps that run per contact. Trigger them via API when something happens in your app."
+---
+
+A Lath automation is a named sequence of steps that runs independently for each contact you trigger it against. Common uses include welcome sequences that drip content over several days, onboarding flows that branch based on whether a user has completed setup, and re-engagement campaigns that fire when a contact goes dormant. You define the steps once, then trigger the automation from your application whenever the relevant event occurs.
+
+## Step types
+
+Each step in the `steps` array is an object with a `type` field that determines its behaviour.
+
+<Accordion title="send — deliver an email or SMS">
+  Sends a message to the contact using a published template. Every send step passes through the same suppression, consent, and spending cap checks as a direct `email/send` call.
+
+  | Field | Type | Required | Description |
+  |---|---|---|---|
+  | `type` | string | ✓ | `"send"` |
+  | `channel` | string | ✓ | `"email"` or `"sms"` |
+  | `template` | string | ✓ | Name of a published template |
+  | `topic` | string | ✓ | Consent topic for this send |
+  | `from` | string | Required for email | Verified sender address when `channel` is `"email"`. Not used for SMS sends. |
+  | `subject` | string | | Override the template subject (email only) |
+  | `variables` | object | | Key/value pairs injected into the template |
+
+  ```json
+  {
+    "type": "send",
+    "channel": "email",
+    "template": "welcome",
+    "topic": "transactional",
+    "from": "hello@yourcompany.com",
+    "variables": { "firstName": "{{ contact.firstName }}" }
+  }
+  ```
+</Accordion>
+
+<Accordion title="wait — pause before the next step">
+  Holds the automation for a specified number of seconds before advancing to the next step. Use this to space out a drip sequence or to wait for a reasonable action window before sending a follow-up.
+
+  | Field | Type | Required | Description |
+  |---|---|---|---|
+  | `type` | string | ✓ | `"wait"` |
+  | `seconds` | integer | ✓ | Duration to pause. Maximum is 7,776,000 (90 days). |
+
+  ```json
+  { "type": "wait", "seconds": 86400 }
+  ```
+</Accordion>
+
+<Accordion title="property.set — update a contact property">
+  Sets a key/value property on the contact record. Use this to track where a contact is in an automation flow or to unlock other segments and conditions downstream.
+
+  | Field | Type | Required | Description |
+  |---|---|---|---|
+  | `type` | string | ✓ | `"property.set"` |
+  | `key` | string | ✓ | The property name to set on the contact |
+  | `value` | string \| number \| boolean \| null | ✓ | The value to assign. Pass `null` to clear the property. |
+
+  ```json
+  { "type": "property.set", "key": "onboardingStatus", "value": "welcome_sent" }
+  ```
+</Accordion>
+
+<Accordion title="branch — split on a condition">
+  Evaluates a condition and follows either the `then` or `else` path. Both paths are arrays of steps and can themselves contain nested branches.
+
+  | Field | Type | Required | Description |
+  |---|---|---|---|
+  | `type` | string | ✓ | `"branch"` |
+  | `if` | object | ✓ | Condition object with `field`, `op`, and `value` |
+  | `then` | array | ✓ | Steps to run when the condition is true |
+  | `else` | array | ✓ | Steps to run when the condition is false |
+
+  **Condition fields**
+
+  - `field` — dot-notation reference: `properties.<key>`, `context.<key>`, or `consent.<topic>`
+  - `op` — one of: `eq`, `neq`, `exists`, `not_exists`, `gt`, `lt`, `contains`
+  - `value` — the value to compare against (omit for `exists` / `not_exists`)
+
+  ```json
+  {
+    "type": "branch",
+    "if": { "field": "properties.onboardingComplete", "op": "eq", "value": "true" },
+    "then": [
+      { "type": "send", "channel": "email", "template": "tips", "topic": "transactional", "from": "hello@yourcompany.com" }
+    ],
+    "else": [
+      { "type": "send", "channel": "email", "template": "nudge", "topic": "transactional", "from": "hello@yourcompany.com" }
+    ]
+  }
+  ```
+</Accordion>
+
+## Create an automation
+
+`POST /v1/email/automation/create` defines the automation and returns an `automationId`. Creating an automation does not trigger it — it only registers the step sequence.
+
+<ParamField body="name" type="string" required>
+  A human-readable name for the automation (for example, `"Welcome Sequence"`). Shown in the dashboard.
+</ParamField>
+
+<ParamField body="steps" type="array" required>
+  An ordered array of step objects. Steps execute sequentially for each triggered contact run.
+</ParamField>
+
+## Trigger an automation
+
+`POST /v1/email/automation/trigger` starts a new run of the automation for a specific contact. Each trigger creates an independent run — the same contact can have multiple concurrent runs of the same automation.
+
+<ParamField body="automationId" type="string" required>
+  The ID returned when you created the automation.
+</ParamField>
+
+<ParamField body="contactId" type="string" required>
+  The Lath contact ID of the person to run the automation for.
+</ParamField>
+
+<ParamField body="context" type="object">
+  Optional key/value object available as `context.<key>` inside branch conditions and as `{{ context.key }}` in template variables. Use this to pass event-specific data at trigger time (for example, `{ "planName": "Pro" }`).
+</ParamField>
+
+## Update an automation
+
+`POST /v1/email/automation/update` replaces the `steps` array of an existing automation. Active runs that have already started are not affected — only future triggers use the updated steps.
+
+```bash
+curl -X POST https://platform.trylath.com/v1/email/automation/update \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "automationId": "auto_01hx9z3k2p4qr5st6uv7wx8yz",
+    "steps": [ ... ]
+  }'
+```
+
+## Full example: welcome → wait → branch → follow-up
+
+This automation sends a welcome email, waits one day, then checks whether the contact has completed onboarding. Depending on the result, it sends either a tips email or a nudge.
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/email/automation/create \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Welcome Sequence",
+    "steps": [
+      {
+        "type": "send",
+        "channel": "email",
+        "template": "welcome",
+        "topic": "transactional",
+        "from": "hello@yourcompany.com"
+      },
+      {
+        "type": "wait",
+        "seconds": 86400
+      },
+      {
+        "type": "branch",
+        "if": {
+          "field": "properties.onboardingComplete",
+          "op": "eq",
+          "value": "true"
+        },
+        "then": [
+          {
+            "type": "send",
+            "channel": "email",
+            "template": "tips",
+            "topic": "transactional",
+            "from": "hello@yourcompany.com"
+          }
+        ],
+        "else": [
+          {
+            "type": "send",
+            "channel": "email",
+            "template": "nudge",
+            "topic": "transactional",
+            "from": "hello@yourcompany.com"
+          }
+        ]
+      }
+    ]
+  }'
+```
+
+```typescript TypeScript SDK
+import { Lath } from "@trylath/sdk";
+
+const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+const { result } = await lath.email.automation.create({
+  name: "Welcome Sequence",
+  steps: [
+    {
+      type: "send",
+      channel: "email",
+      template: "welcome",
+      topic: "transactional",
+      from: "hello@yourcompany.com",
+    },
+    { type: "wait", seconds: 86400 },
+    {
+      type: "branch",
+      if: { field: "properties.onboardingComplete", op: "eq", value: "true" },
+      then: [
+        {
+          type: "send",
+          channel: "email",
+          template: "tips",
+          topic: "transactional",
+          from: "hello@yourcompany.com",
+        },
+      ],
+      else: [
+        {
+          type: "send",
+          channel: "email",
+          template: "nudge",
+          topic: "transactional",
+          from: "hello@yourcompany.com",
+        },
+      ],
+    },
+  ],
+});
+
+// Trigger for a newly signed-up contact
+await lath.email.automation.trigger({
+  automationId: result.automationId,
+  contactId: "ctt_01hx9z3k2p4qr5st6uv7wx8yz",
+  context: { signupSource: "homepage" },
+});
+```
+</CodeGroup>
+
+<Note>
+  Each send step within an automation respects the same consent and suppression rules as a direct `email/send` call. If a contact is suppressed at the time of a send step, that step is skipped and the automation continues with the next step.
+</Note>
+
+<Tip>
+  Use `context` to pass event-specific data at trigger time rather than updating contact properties first. For example, pass `{ "planName": "Pro" }` in context so your template can say "Welcome to Pro" without a separate `property.set` step.
+</Tip>

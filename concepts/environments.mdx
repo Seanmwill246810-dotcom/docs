@@ -1,0 +1,119 @@
+---
+title: "Lath Live and Test Environments: Keep Development Safe"
+sidebarTitle: "Environments"
+description: "Every Lath project ships with live and test environments. Test keys intercept all sends so nothing real is delivered until you're ready to go live."
+---
+
+When you create a Lath account, your project comes with two environments out of the box: **live** and **test**. The API surface is identical in both — the same endpoints, the same request shapes, the same response envelopes. The only difference is what happens at the edge: test environment sends are intercepted before delivery, so no real email or SMS ever leaves Lath's infrastructure.
+
+This means you can build and test your entire integration — including consent flows, automation triggers, and webhook handlers — before a single message reaches a real inbox.
+
+---
+
+## Live vs test at a glance
+
+| Environment | Key prefix | Sends real messages | Charged against billing |
+|-------------|------------|---------------------|------------------------|
+| Live | `lath_live_sk…` / `lath_live_pk…` | Yes | Yes |
+| Test | `lath_test_sk…` / `lath_test_pk…` | No | No |
+
+<Tip>
+  Keep your live keys out of your local development environment. Store keys in environment variables and use your test key by default:
+
+  ```bash
+  # .env.local
+  LATH_SECRET_KEY=lath_test_sk...
+  ```
+
+  Switch to `lath_live_sk...` only in production, via your deployment platform's secrets manager.
+</Tip>
+
+---
+
+## API keys
+
+Each environment ships with a **secret key** (server-side, full access) and a **publishable key** (browser-safe, restricted to auth flows and preference page operations). The key prefix tells Lath which environment every request belongs to — you never pass an `environmentId` separately.
+
+| Key type | Prefix example | Where to use |
+|----------|----------------|--------------|
+| Live secret | `lath_live_sk…` | Server only — never expose in client code |
+| Live publishable | `lath_live_pk…` | Browser / mobile clients |
+| Test secret | `lath_test_sk…` | Server — CI, local development |
+| Test publishable | `lath_test_pk…` | Browser — local development |
+
+<Warning>
+  Never commit a secret key (`lath_live_sk…` or `lath_test_sk…`) to source control. If a key is exposed, rotate it immediately from the dashboard under **Developers → API Keys**.
+</Warning>
+
+---
+
+## Creating additional API keys
+
+You can create extra API keys per environment with scoped permissions — for example, a key that can only send email, or one restricted to read-only audience operations. Use `POST /v1/developers/key/create`:
+
+<ParamField body="name" type="string" required>
+  A human-readable label for the key (e.g., `"CI pipeline"`, `"Email service"`).
+</ParamField>
+
+<ParamField body="scopes" type="array">
+  A list of permission scopes to grant. Omit to create a full-access key. Example scopes: `["email:send", "audience:read"]`.
+</ParamField>
+
+<CodeGroup>
+
+```typescript TypeScript SDK
+import Lath from "@trylath/sdk";
+
+const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+const { result: key } = await lath.developers.key.create({
+  name: "Email service",
+  scopes: ["email:send", "audience:read"],
+});
+
+// Store result.key securely — it's only shown once
+console.log(key.key); // lath_test_sk...
+```
+
+```bash REST (curl)
+curl -X POST https://platform.trylath.com/v1/developers/key/create \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Email service",
+    "scopes": ["email:send", "audience:read"]
+  }'
+```
+
+</CodeGroup>
+
+<Note>
+  The secret value is returned once at creation time. Lath stores only a hashed version of the key — if you lose it, create a new one and revoke the old one via `POST /v1/developers/key/revoke`.
+</Note>
+
+---
+
+## Test environment behaviour
+
+The test environment behaves identically to live in every observable way except actual delivery:
+
+<CardGroup cols={2}>
+  <Card title="Contacts and consent" icon="user-check">
+    Contact records, consent grants, and revocations are all real and persistent within the test environment. Use them to verify your consent logic end-to-end.
+  </Card>
+  <Card title="Email and SMS" icon="envelope">
+    Sends return the same response shape, including `activityId` and delivery status events — but messages are captured internally rather than delivered to real recipients.
+  </Card>
+  <Card title="Auth flows" icon="key">
+    Magic links, email codes, and OAuth flows work end-to-end in test mode. Email codes are returned directly in the API response so you can complete flows in automated tests.
+  </Card>
+  <Card title="Webhooks" icon="webhook">
+    Webhook events fire normally in test mode. Point your local listener at them using the Lath CLI: `lath dev --forward http://localhost:3000/webhooks`.
+  </Card>
+</CardGroup>
+
+---
+
+## Switching environments
+
+Your Lath dashboard shows a live/test toggle in the top navigation bar. Switching changes the view of contacts, sends, and activity logs — live and test data are fully isolated from each other.

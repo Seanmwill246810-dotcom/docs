@@ -1,0 +1,541 @@
+---
+title: "Account API: Lifecycle, Members, and Theme Customization"
+sidebarTitle: "Account"
+description: "REST endpoints for account lifecycle, member invitations, role management, and theme customization. Manage your Lath account and hosted-page branding."
+---
+
+The Account API gives you programmatic control over every aspect of your Lath account. Use it to provision new accounts, manage team members and their roles, and fine-tune the visual appearance of hosted pages — all without touching the dashboard. Every endpoint follows the standard Lath pattern: POST-only, Bearer-authenticated (except where noted), and returning `{ activityId, result }`.
+
+---
+
+## Account lifecycle
+
+These endpoints manage the top-level account object. Account closure is soft — all records are preserved and the operation is fully reversible.
+
+### `POST /v1/account/signup`
+
+Creates a new Lath account. **No authentication required.** This is the only endpoint that returns API keys — they are shown exactly once and cannot be retrieved later.
+
+<Warning>
+  Store your API keys immediately after calling `account/signup`. Lath never
+  displays secret keys again after this response. If you lose them, create
+  additional keys via `developers/key/create` — but the original keys cannot
+  be recovered.
+</Warning>
+
+<Tabs>
+  <Tab title="Request">
+    <ParamField body="email" type="string" required>
+      The email address of the account owner. Used for login and billing
+      notifications.
+    </ParamField>
+    <ParamField body="country" type="string" required>
+      Two-letter country code in ISO 3166-1 alpha-2 format (e.g. `US`, `GB`,
+      `DE`). Determines billing currency and default compliance settings.
+    </ParamField>
+    <ParamField body="accountName" type="string">
+      Optional display name for the account. Defaults to the owner's email
+      domain if omitted.
+    </ParamField>
+  </Tab>
+  <Tab title="Response">
+    <ResponseField name="accountId" type="string">
+      Unique identifier for the newly created account.
+    </ResponseField>
+    <ResponseField name="projectId" type="string">
+      Default project created alongside the account.
+    </ResponseField>
+    <ResponseField name="live" type="object">
+      Live-mode key pair. Use these for production traffic.
+      <Expandable title="live">
+        <ResponseField name="key" type="string">
+          Secret key (`lath_live_sk…`). Never expose this in client-side code.
+        </ResponseField>
+        <ResponseField name="publishableKey" type="string">
+          Publishable key (`lath_live_pk…`). Safe to include in browser bundles.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    <ResponseField name="test" type="object">
+      Test-mode key pair. Use these in development and CI environments.
+      <Expandable title="test">
+        <ResponseField name="key" type="string">
+          Secret key (`lath_test_sk…`).
+        </ResponseField>
+        <ResponseField name="publishableKey" type="string">
+          Publishable key (`lath_test_pk…`).
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    <ResponseField name="owner" type="object">
+      Details about the owner invitation sent to the provided email address.
+      <Expandable title="owner">
+        <ResponseField name="email" type="string">
+          The owner's email address.
+        </ResponseField>
+        <ResponseField name="acceptUrl" type="string">
+          One-time URL the owner must visit to activate their account.
+        </ResponseField>
+        <ResponseField name="acceptExpiresAt" type="string">
+          ISO 8601 timestamp after which the `acceptUrl` is no longer valid.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Tab>
+</Tabs>
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/account/signup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "you@example.com",
+    "country": "US",
+    "accountName": "Acme Corp"
+  }'
+```
+
+```ts TypeScript
+import { LathClient } from "@trylath/sdk";
+
+// No API key required for signup
+const client = new LathClient();
+
+const { result } = await client.account.signup({
+  email: "you@example.com",
+  country: "US",
+  accountName: "Acme Corp",
+});
+
+console.log(result.live.key); // store this securely — shown only once
+```
+</CodeGroup>
+
+---
+
+### `POST /v1/account/get`
+
+Returns information about the authenticated account.
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/account/get \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+```ts TypeScript
+const { result } = await client.account.get();
+```
+</CodeGroup>
+
+<ResponseField name="name" type="string">
+  Account display name.
+</ResponseField>
+<ResponseField name="country" type="string">
+  ISO 3166-1 alpha-2 country code set at signup.
+</ResponseField>
+<ResponseField name="projects" type="array">
+  List of projects belonging to the account.
+</ResponseField>
+<ResponseField name="memberCount" type="integer">
+  Total number of active members (does not include pending invitations).
+</ResponseField>
+<ResponseField name="closedAt" type="string | null">
+  ISO 8601 timestamp if the account has been closed, otherwise `null`.
+</ResponseField>
+
+---
+
+### `POST /v1/account/close`
+
+Closes the account and suspends all outbound sends. All records — contacts, templates, logs — are preserved. You can reverse this at any time with `account/reopen`.
+
+<ParamField body="reason" type="string" required>
+  A human-readable explanation for the closure. Must be between 3 and 500
+  characters.
+</ParamField>
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/account/close \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "Migrating to a new account structure."}'
+```
+
+```ts TypeScript
+const { result } = await client.account.close({
+  reason: "Migrating to a new account structure.",
+});
+```
+</CodeGroup>
+
+---
+
+### `POST /v1/account/reopen`
+
+Reverses a previous `account/close`. Sending resumes immediately once the account is reopened. No request body is required.
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/account/reopen \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+```ts TypeScript
+const { result } = await client.account.reopen();
+```
+</CodeGroup>
+
+---
+
+## Member management
+
+Lath supports four roles that control what a team member can do inside your account.
+
+<CardGroup cols={2}>
+  <Card title="owner" icon="crown">
+    Full access to all settings, billing, and members. At least one owner must
+    remain active at all times.
+  </Card>
+  <Card title="admin" icon="shield-halved">
+    All permissions except billing and owner management.
+  </Card>
+  <Card title="developer" icon="code">
+    API key and webhook access. Cannot manage members or billing. Default role
+    for new invitations.
+  </Card>
+  <Card title="viewer" icon="eye">
+    Read-only access to logs and analytics. Cannot make any changes.
+  </Card>
+</CardGroup>
+
+### `POST /v1/account/member/invite`
+
+Sends an invitation email to the specified address and creates a pending membership record.
+
+<Tabs>
+  <Tab title="Request">
+    <ParamField body="email" type="string" required>
+      Email address of the person you want to invite.
+    </ParamField>
+    <ParamField body="role" type="string">
+      Role to assign on acceptance. One of `owner`, `admin`, `developer`,
+      `viewer`. Defaults to `developer`.
+    </ParamField>
+  </Tab>
+  <Tab title="Response">
+    <ResponseField name="member" type="object">
+      The newly created pending member record, including `memberId` and current
+      status.
+    </ResponseField>
+    <ResponseField name="expiresAt" type="string">
+      ISO 8601 timestamp after which the invitation link expires.
+    </ResponseField>
+    <ResponseField name="resent" type="boolean">
+      `true` if the email address already had a pending invitation and a fresh
+      link was issued.
+    </ResponseField>
+  </Tab>
+</Tabs>
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/account/member/invite \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "colleague@example.com", "role": "developer"}'
+```
+
+```ts TypeScript
+const { result } = await client.account.member.invite({
+  email: "colleague@example.com",
+  role: "developer",
+});
+```
+</CodeGroup>
+
+---
+
+### `POST /v1/account/member/list`
+
+Returns all active members and pending invitations along with their assigned roles.
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/account/member/list \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+```ts TypeScript
+const { result } = await client.account.member.list();
+```
+</CodeGroup>
+
+---
+
+### `POST /v1/account/member/update`
+
+Changes a member's role. Lath refuses to demote the last remaining owner to protect account access.
+
+<ParamField body="memberId" type="string" required>
+  The ID of the member whose role you want to change.
+</ParamField>
+<ParamField body="role" type="string" required>
+  The new role: `owner`, `admin`, `developer`, or `viewer`.
+</ParamField>
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/account/member/update \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"memberId": "mbr_01abc", "role": "admin"}'
+```
+
+```ts TypeScript
+const { result } = await client.account.member.update({
+  memberId: "mbr_01abc",
+  role: "admin",
+});
+```
+</CodeGroup>
+
+---
+
+### `POST /v1/account/member/remove`
+
+Removes a member from the account. Lath refuses this operation if the member is the only active owner.
+
+<ParamField body="memberId" type="string" required>
+  The ID of the member to remove.
+</ParamField>
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/account/member/remove \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"memberId": "mbr_01abc"}'
+```
+
+```ts TypeScript
+const { result } = await client.account.member.remove({
+  memberId: "mbr_01abc",
+});
+```
+</CodeGroup>
+
+---
+
+### `POST /v1/account/member/accept`
+
+Activates a pending invitation. **No authentication required** — this endpoint is called from the invite link sent to the new member.
+
+<ParamField body="token" type="string" required>
+  The invitation token extracted from the invite URL.
+</ParamField>
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/account/member/accept \
+  -H "Content-Type: application/json" \
+  -d '{"token": "inv_token_…"}'
+```
+
+```ts TypeScript
+const { result } = await client.account.member.accept({
+  token: "inv_token_…",
+});
+```
+</CodeGroup>
+
+---
+
+## Theme customization
+
+Lath hosted pages — magic link landing pages, email preference centres, passkey prompts — all render using a shared theme. The theme is composed of **tokens** (colors, fonts, radii, logo) and **copy** (UI strings). Changes flow through a draft/publish cycle so you can preview before going live.
+
+<Steps>
+  <Step title="Update the draft">
+    Call `account/theme/set` with any token or copy values you want to change.
+    You can call it multiple times — each call merges into the existing draft.
+  </Step>
+  <Step title="Review the draft">
+    Call `account/theme/get` to compare `draft` against `published` and
+    `defaults`.
+  </Step>
+  <Step title="Publish">
+    Call `account/theme/publish`. Hosted pages pick up the new theme on their
+    next request.
+  </Step>
+</Steps>
+
+### Token reference
+
+| Token | Type | Description |
+|---|---|---|
+| `bg-canvas` | hex color | Page background color |
+| `bg-surface` | hex color | Card and panel background color |
+| `fg-primary` | hex color | Primary body text color |
+| `action-primary-bg` | hex color | Primary button background color |
+| `fg-on-action` | hex color | Text color rendered on top of action buttons |
+| `font-ui` | string | UI font family (e.g. `"Inter, sans-serif"`) |
+| `font-mono` | string | Monospace font family (e.g. `"JetBrains Mono, monospace"`) |
+| `radius-sm` | `{n}px` | Small border radius (e.g. inputs) |
+| `radius-md` | `{n}px` | Medium border radius (e.g. cards) |
+| `radius-lg` | `{n}px` | Large border radius (e.g. modals) |
+| `logo-url` | URI | URL of the logo image shown on hosted pages |
+
+<Tip>
+  Set any token or copy value to `null` in your `account/theme/set` request to
+  revert just that field to its platform default, without affecting other
+  customizations.
+</Tip>
+
+---
+
+### `POST /v1/account/theme/set`
+
+Merges the provided token and copy changes into the current draft. Calling this endpoint multiple times is safe — it always merges, never replaces the entire draft.
+
+<ParamField body="tokens" type="object">
+  An object whose keys are token names from the table above and whose values
+  are the desired string values (or `null` to revert to default).
+</ParamField>
+<ParamField body="copy" type="object">
+  An object whose keys are copy keys (retrieve valid keys from
+  `account/theme/get`) and whose values are the replacement strings (or `null`
+  to revert).
+</ParamField>
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/account/theme/set \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tokens": {
+      "bg-canvas": "#0f0f11",
+      "bg-surface": "#1a1a1e",
+      "fg-primary": "#f2f2f3",
+      "action-primary-bg": "#6c47ff",
+      "fg-on-action": "#ffffff",
+      "radius-md": "8px",
+      "logo-url": "https://cdn.example.com/logo.svg"
+    }
+  }'
+```
+
+```ts TypeScript
+const { result } = await client.account.theme.set({
+  tokens: {
+    "bg-canvas": "#0f0f11",
+    "bg-surface": "#1a1a1e",
+    "fg-primary": "#f2f2f3",
+    "action-primary-bg": "#6c47ff",
+    "fg-on-action": "#ffffff",
+    "radius-md": "8px",
+    "logo-url": "https://cdn.example.com/logo.svg",
+  },
+});
+```
+</CodeGroup>
+
+---
+
+### `POST /v1/account/theme/publish`
+
+Promotes the current draft to published. Hosted pages pick up the new theme on their next request — no cache purge required.
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/account/theme/publish \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+```ts TypeScript
+const { result } = await client.account.theme.publish();
+```
+</CodeGroup>
+
+---
+
+### `POST /v1/account/theme/get`
+
+Returns the full theme state: the currently published theme, any unpublished draft, the platform defaults, and the full list of valid token and copy keys.
+
+<ResponseField name="published" type="object">
+  The currently live theme overrides.
+</ResponseField>
+<ResponseField name="draft" type="object">
+  Unpublished changes waiting to be promoted.
+</ResponseField>
+<ResponseField name="defaults" type="object">
+  Lath's out-of-the-box values for every token and copy key.
+</ResponseField>
+<ResponseField name="tokenKeys" type="array">
+  All valid token key names.
+</ResponseField>
+<ResponseField name="copyKeys" type="array">
+  All valid copy key names.
+</ResponseField>
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/account/theme/get \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+```ts TypeScript
+const { result } = await client.account.theme.get();
+
+console.log(result.draft);     // pending changes
+console.log(result.published); // what users see now
+```
+</CodeGroup>
+
+---
+
+### `POST /v1/account/theme/reset`
+
+Discards the current draft. Pass `{ "published": true }` to also revert the published theme to Lath's platform defaults, restoring the out-of-the-box appearance for all hosted pages.
+
+<ParamField body="published" type="boolean">
+  When `true`, reverts the published theme to platform defaults in addition to
+  discarding the draft. Omit or set to `false` to discard only the draft.
+</ParamField>
+
+<CodeGroup>
+```bash cURL
+# Discard the draft only
+curl -X POST https://platform.trylath.com/v1/account/theme/reset \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+
+# Discard the draft AND revert to defaults
+curl -X POST https://platform.trylath.com/v1/account/theme/reset \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"published": true}'
+```
+
+```ts TypeScript
+// Discard draft only
+await client.account.theme.reset();
+
+// Discard draft and revert published to defaults
+await client.account.theme.reset({ published: true });
+```
+</CodeGroup>

@@ -1,0 +1,229 @@
+---
+title: "Managing User Sessions with Lath Auth"
+sidebarTitle: "Sessions"
+description: "Lath session tokens are returned by every sign-in flow. List active sessions per contact, revoke individual sessions, or revoke all at once."
+---
+
+Every sign-in method in Lath Auth — email code, magic link, password, passkey, or social OAuth — returns a session token on success. That token represents an authenticated session for a specific contact. You store it on the client (cookie, `localStorage`, or a mobile keychain), include it when validating requests on your server, or pass it directly to `session/get` to look up the contact it belongs to. Sessions track the device and browser context captured at sign-in time, so you can show users which devices are active and revoke ones they don't recognize.
+
+## Session Operations
+
+<CardGroup cols={2}>
+  <Card title="session/get" icon="magnifying-glass">
+    Resolve a session token to a contact and session metadata.
+  </Card>
+  <Card title="session/list" icon="list">
+    Return all active sessions for a given contact ID.
+  </Card>
+  <Card title="session/revoke" icon="xmark">
+    Invalidate a single session by its ID.
+  </Card>
+  <Card title="session/revoke-all" icon="shield-xmark">
+    Invalidate every active session for a contact at once.
+  </Card>
+</CardGroup>
+
+## Get Session Info
+
+Use `POST /v1/auth/session/get` to validate a token and retrieve the contact it belongs to. Call this on your server whenever you need to authenticate an incoming request.
+
+<ParamField body="sessionToken" type="string" required>
+  The session token returned by any sign-in flow (prefixed `lath_sess_…`).
+</ParamField>
+
+<CodeGroup>
+```bash REST
+curl -X POST https://platform.trylath.com/v1/auth/session/get \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "sessionToken": "lath_sess_..." }'
+```
+
+```typescript TypeScript SDK
+import { Lath } from "@trylath/sdk";
+
+const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+const { result } = await lath.auth.session.get({
+  sessionToken: "lath_sess_...",
+});
+```
+</CodeGroup>
+
+<ResponseField name="contactId" type="string">
+  The ID of the contact this session belongs to.
+</ResponseField>
+<ResponseField name="email" type="string">
+  The verified email address associated with the contact.
+</ResponseField>
+<ResponseField name="deviceInfo" type="object">
+  Browser, OS, and device metadata captured at sign-in time.
+</ResponseField>
+<ResponseField name="createdAt" type="string">
+  ISO 8601 timestamp of when the session was created.
+</ResponseField>
+<ResponseField name="lastSeenAt" type="string">
+  ISO 8601 timestamp of when the session was last used.
+</ResponseField>
+
+```json Response
+{
+  "activityId": "act_01j9...",
+  "result": {
+    "sessionId": "ses_01j9...",
+    "contactId": "con_01j9...",
+    "email": "ada@example.com",
+    "deviceInfo": {
+      "browser": "Chrome",
+      "os": "macOS",
+      "device": "Desktop"
+    },
+    "createdAt": "2024-11-01T14:32:00Z",
+    "lastSeenAt": "2024-11-04T09:15:42Z"
+  }
+}
+```
+
+## List Active Sessions
+
+Use `POST /v1/auth/session/list` to retrieve all active sessions for a contact. Surface this data in your app's security settings so users can see every device that is currently signed in.
+
+<ParamField body="contactId" type="string" required>
+  The contact whose sessions you want to list.
+</ParamField>
+
+<CodeGroup>
+```bash REST
+curl -X POST https://platform.trylath.com/v1/auth/session/list \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "contactId": "con_01j9..." }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.auth.session.list({
+  contactId: "con_01j9...",
+});
+
+for (const session of result.sessions) {
+  console.log(session.sessionId, session.deviceInfo, session.lastSeenAt);
+}
+```
+</CodeGroup>
+
+```json Response
+{
+  "activityId": "act_01j9...",
+  "result": {
+    "sessions": [
+      {
+        "sessionId": "ses_01j9...",
+        "deviceInfo": {
+          "browser": "Chrome",
+          "os": "macOS",
+          "device": "Desktop"
+        },
+        "createdAt": "2024-11-01T14:32:00Z",
+        "lastSeenAt": "2024-11-04T09:15:42Z"
+      },
+      {
+        "sessionId": "ses_02k8...",
+        "deviceInfo": {
+          "browser": "Safari",
+          "os": "iOS",
+          "device": "iPhone"
+        },
+        "createdAt": "2024-10-28T08:00:11Z",
+        "lastSeenAt": "2024-11-03T20:44:03Z"
+      }
+    ]
+  }
+}
+```
+
+## Revoke a Session
+
+Use `POST /v1/auth/session/revoke` to invalidate a specific session. The token associated with that session stops working immediately. This is useful when a user signs out of a single device.
+
+<ParamField body="sessionId" type="string" required>
+  The ID of the session to revoke (prefixed `ses_…`).
+</ParamField>
+
+<CodeGroup>
+```bash REST
+curl -X POST https://platform.trylath.com/v1/auth/session/revoke \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "sessionId": "ses_01j9..." }'
+```
+
+```typescript TypeScript SDK
+await lath.auth.session.revoke({ sessionId: "ses_01j9..." });
+```
+</CodeGroup>
+
+```json Response
+{
+  "activityId": "act_01j9...",
+  "result": {
+    "revoked": true
+  }
+}
+```
+
+## Revoke All Sessions
+
+Use `POST /v1/auth/session/revoke-all` to invalidate every active session for a contact in a single call. This is the correct response to a password change, an account takeover report, or any security incident.
+
+<ParamField body="contactId" type="string" required>
+  The contact whose sessions should all be revoked.
+</ParamField>
+
+<CodeGroup>
+```bash REST
+curl -X POST https://platform.trylath.com/v1/auth/session/revoke-all \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "contactId": "con_01j9..." }'
+```
+
+```typescript TypeScript SDK
+await lath.auth.session.revokeAll({ contactId: "con_01j9..." });
+```
+</CodeGroup>
+
+```json Response
+{
+  "activityId": "act_01j9...",
+  "result": {
+    "count": 3
+  }
+}
+```
+
+<Note>
+  Always revoke all sessions when a user changes their password or when your application detects suspicious activity. Revoking all sessions forces every connected device to re-authenticate, closing any session an attacker may have already established.
+</Note>
+
+## Complete Example: List and Selectively Revoke
+
+Here is a server-side flow that lists all sessions for a contact, logs device info for audit purposes, then revokes every session except the current one.
+
+```typescript TypeScript SDK
+const currentSessionId = "ses_current...";
+
+// 1. List all active sessions
+const { result } = await lath.auth.session.list({ contactId: "con_01j9..." });
+
+// 2. Revoke every session that is not the current one
+for (const session of result.sessions) {
+  if (session.sessionId !== currentSessionId) {
+    await lath.auth.session.revoke({ sessionId: session.sessionId });
+    console.log(`Revoked session ${session.sessionId} on ${session.deviceInfo.os}`);
+  }
+}
+```
+
+<Tip>
+  Expose a "Sign out of all other devices" button in your app's security settings. Pair it with a `session/revoke-all` call followed by a fresh `session/get` to confirm the current session is still valid.
+</Tip>

@@ -1,0 +1,142 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "Lath",
+  "theme": "luma",
+  "colors": {
+    "primary": "#ef7025",
+    "light": "#eec9bc",
+    "dark": "#4fa1ab"
+  },
+  "favicon": "/favicon.svg",
+  "navbar": {
+    "primary": {
+      "type": "button",
+      "label": "Start Building",
+      "href": "https://dashboard.trylath.com"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "authentication"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/contacts",
+              "concepts/consent",
+              "concepts/environments",
+              "concepts/idempotency"
+            ]
+          },
+          {
+            "group": "Auth",
+            "pages": [
+              "auth/overview",
+              "auth/sign-in-methods",
+              "auth/sessions",
+              "auth/organizations"
+            ]
+          },
+          {
+            "group": "Email",
+            "pages": [
+              "email/overview",
+              "email/send",
+              "email/templates",
+              "email/automations",
+              "email/broadcasts"
+            ]
+          },
+          {
+            "group": "SMS",
+            "pages": [
+              "sms/overview",
+              "sms/send",
+              "sms/keywords",
+              "sms/registration"
+            ]
+          },
+          {
+            "group": "Audience",
+            "pages": [
+              "audience/contacts",
+              "audience/segments",
+              "audience/preferences"
+            ]
+          },
+          {
+            "group": "Developers",
+            "pages": [
+              "developers/api-keys",
+              "developers/webhooks",
+              "developers/sdks",
+              "developers/mcp"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api-reference/overview"
+            ]
+          },
+          {
+            "group": "Auth",
+            "pages": [
+              "api-reference/auth/sign-in",
+              "api-reference/auth/sessions",
+              "api-reference/auth/oauth",
+              "api-reference/auth/passkeys",
+              "api-reference/auth/organizations"
+            ]
+          },
+          {
+            "group": "Email",
+            "pages": [
+              "api-reference/email/send",
+              "api-reference/email/templates",
+              "api-reference/email/automations",
+              "api-reference/email/broadcasts"
+            ]
+          },
+          {
+            "group": "SMS",
+            "pages": [
+              "api-reference/sms/send",
+              "api-reference/sms/templates",
+              "api-reference/sms/numbers"
+            ]
+          },
+          {
+            "group": "Audience",
+            "pages": [
+              "api-reference/audience/contacts",
+              "api-reference/audience/consent",
+              "api-reference/audience/segments"
+            ]
+          },
+          {
+            "group": "Account & Billing",
+            "pages": [
+              "api-reference/account/overview",
+              "api-reference/billing/spending-cap"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

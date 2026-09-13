@@ -1,0 +1,155 @@
+---
+title: "Create and Manage API Keys for Your Lath Integration"
+sidebarTitle: "API Keys"
+description: "Create environment-scoped Lath API keys with only the permissions each integration needs. Reduce risk with least-privilege secret and publishable keys."
+---
+
+Every Lath account starts with a secret key and a publishable key for each environment — live and test. These root keys are returned once at signup and never shown again. For each integration you build on top of Lath, create an additional key scoped to only the permissions that integration actually needs. Narrower keys limit blast radius if a credential is ever leaked.
+
+## Key types
+
+Lath issues two categories of key, distinguished by their prefix.
+
+**Secret keys** (`lath_live_sk…`, `lath_test_sk…`) are for server-side use only. They can be granted any permission scope and should never appear in client-side code, version control, or build logs.
+
+**Publishable keys** (`lath_live_pk…`, `lath_test_pk…`) are safe to embed in browser and mobile applications. They are restricted to operations that are explicitly safe for public clients — primarily auth flows initiated by end users.
+
+<Warning>
+  Never use a secret key in browser or mobile code. If a secret key is exposed, revoke it immediately from the dashboard or via `POST /v1/developers/key/revoke` and replace it with a new one.
+</Warning>
+
+## Permission scopes
+
+When creating a scoped key you specify an explicit list of permissions. The key can only call operations covered by those scopes.
+
+| Permission | Allows |
+|---|---|
+| `account:read` | Read account info and member list |
+| `account:write` | Manage members, theme |
+| `email:send` | Send transactional email |
+| `email:manage` | Create/update templates, automations |
+| `sms:send` | Send SMS |
+| `audience:read` | Read contacts, segments |
+| `audience:write` | Create/update contacts, grant/revoke consent |
+| `developers:manage` | Create keys, manage webhooks |
+| `billing:read` | Read usage and invoices |
+
+<Tip>
+  Follow the principle of least privilege. An email-sending service only needs `email:send` — it has no reason to read billing data or manage webhooks.
+</Tip>
+
+## Create a scoped key
+
+Send a `POST /v1/developers/key/create` request with the fields below.
+
+<ParamField body="name" type="string" required>
+  A human-readable label for the key. Use something that identifies the integration — for example `"transactional-mailer"` or `"crm-sync"`.
+</ParamField>
+
+<ParamField body="permissions" type="array of strings" required>
+  The list of permission scopes to grant. See the table above for available values. Example: `["email:send", "audience:read"]`.
+</ParamField>
+
+<ParamField body="type" type="string">
+  `"secret"` (default) or `"publishable"`. Publishable keys are automatically restricted to client-safe operations regardless of the scopes you list.
+</ParamField>
+
+<CodeGroup>
+
+```bash REST
+curl -X POST https://platform.trylath.com/v1/developers/key/create \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: create-mailer-key-01" \
+  -d '{
+    "name": "transactional-mailer",
+    "permissions": ["email:send", "audience:read"],
+    "type": "secret"
+  }'
+```
+
+```typescript TypeScript SDK
+import { Lath } from '@trylath/sdk';
+
+const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+const { result } = await lath.developers.key.create({
+  name: 'transactional-mailer',
+  permissions: ['email:send', 'audience:read'],
+  type: 'secret',
+});
+
+// Store result.key now — it is only returned once
+console.log(result.key); // lath_live_sk_...
+```
+
+</CodeGroup>
+
+<Warning>
+  The full key value is returned **only in the creation response** and is never retrievable again. Store it securely in your secrets manager immediately.
+</Warning>
+
+The response follows the standard `{ activityId, result }` envelope:
+
+<ResponseField name="activityId" type="string">
+  Unique identifier for this API activity, useful for support requests.
+</ResponseField>
+
+<ResponseField name="result.keyId" type="string">
+  The stable ID for the key, used when listing or revoking.
+</ResponseField>
+
+<ResponseField name="result.key" type="string">
+  The full key value. Shown once — store it now.
+</ResponseField>
+
+<ResponseField name="result.name" type="string">
+  The label you provided.
+</ResponseField>
+
+<ResponseField name="result.permissions" type="array of strings">
+  The permission scopes granted to this key.
+</ResponseField>
+
+## List existing keys
+
+`POST /v1/developers/key/list` returns all keys on your account — their names, IDs, scopes, type, and last-used timestamps. The actual key value is never included in list responses.
+
+```bash
+curl -X POST https://platform.trylath.com/v1/developers/key/list \
+  -H "Authorization: Bearer $LATH_SECRET_KEY"
+```
+
+Use the `keyId` values returned here when revoking a key.
+
+## Revoke a key
+
+`POST /v1/developers/key/revoke` permanently invalidates a key. Pass the `keyId` of the key to remove.
+
+```bash
+curl -X POST https://platform.trylath.com/v1/developers/key/revoke \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "keyId": "key_..." }'
+```
+
+<Warning>
+  Revoking a key is immediate and irreversible. Any integration using that key will stop working the moment the request completes. Rotate first — create the replacement key, deploy it, then revoke the old one.
+</Warning>
+
+## Best practices
+
+<CardGroup cols={2}>
+  <Card title="One key per integration" icon="key">
+    Give each service or deployment its own key. Rotating or revoking one key won't affect anything else.
+  </Card>
+  <Card title="Minimum permissions" icon="lock">
+    Only grant the scopes an integration actually calls. Use `POST /v1/developers/key/list` to audit what's in use.
+  </Card>
+  <Card title="Use test keys in CI" icon="flask">
+    Reference `lath_test_sk…` keys in your CI environment and staging deployments. Test operations are free and isolated from live data.
+  </Card>
+  <Card title="Store secrets securely" icon="shield">
+    Keep keys in a secrets manager (AWS Secrets Manager, HashiCorp Vault, Vercel Environment Variables). Never commit them to source control.
+  </Card>
+</CardGroup>

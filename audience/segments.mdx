@@ -1,0 +1,209 @@
+---
+title: "Audience Segments: Filter Contacts for Targeted Sends"
+sidebarTitle: "Segments"
+description: "Lath segments group contacts by properties, consent status, or event history. Use segments to target broadcasts and automations to the right audience."
+---
+
+A segment is a saved filter that dynamically resolves to a set of contacts matching your criteria at send time. Rather than managing static lists, you define the rules once and let Lath evaluate them every time you trigger a broadcast or automation — so your audience is always up to date without any manual maintenance on your end. Segments can match on contact properties, consent status, or combinations of both using `and`/`or` logic.
+
+<Note>
+  Segments are evaluated at send time. If a contact joins or leaves a segment
+  after a broadcast is created but before it sends, the final recipient list
+  reflects their membership status at the moment the broadcast is dispatched.
+</Note>
+
+## Creating a segment
+
+`POST /v1/audience/segment/create`
+
+Define a segment by giving it a `name` and a `filter` object. The filter
+describes which contacts should be included. Filters can target any contact
+property, consent topic, or combinations of conditions.
+
+<ParamField body="name" type="string" required>
+  A human-readable label for the segment shown in the dashboard and broadcast
+  targeting UI.
+</ParamField>
+
+<ParamField body="filter" type="object" required>
+  A filter expression describing the contacts to include. Supports single
+  conditions and compound `and`/`or` logic — see examples below.
+</ParamField>
+
+### Filter examples
+
+Use a single condition to filter by a contact property or consent value:
+
+<CodeGroup>
+```json By property
+{
+  "field": "properties.plan",
+  "op": "eq",
+  "value": "pro"
+}
+```
+
+```json By consent status
+{
+  "field": "consent.product-news",
+  "op": "eq",
+  "value": true
+}
+```
+
+```json Combined with and/or
+{
+  "and": [
+    {
+      "field": "properties.plan",
+      "op": "eq",
+      "value": "pro"
+    },
+    {
+      "field": "consent.order-updates",
+      "op": "eq",
+      "value": true
+    }
+  ]
+}
+```
+</CodeGroup>
+
+The `op` field supports `eq` (equal), `neq` (not equal), `gt` (greater than),
+`lt` (less than), `contains`, `exists` (field is present), and `not_exists`
+(field is absent). Nest `and`/`or` arrays to express more complex logic.
+
+### Full create example
+
+<CodeGroup>
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/segment/create \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Pro users opted into product news",
+    "filter": {
+      "and": [
+        {
+          "field": "properties.plan",
+          "op": "eq",
+          "value": "pro"
+        },
+        {
+          "field": "consent.product-news",
+          "op": "eq",
+          "value": true
+        }
+      ]
+    }
+  }'
+```
+
+```typescript TypeScript
+import { Lath } from "@trylath/sdk";
+
+const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+const { result } = await lath.audience.segment.create({
+  name: "Pro users opted into product news",
+  filter: {
+    and: [
+      {
+        field: "properties.plan",
+        op: "eq",
+        value: "pro",
+      },
+      {
+        field: "consent.product-news",
+        op: "eq",
+        value: true,
+      },
+    ],
+  },
+});
+
+console.log(result.segmentId); // e.g. "seg_01j..."
+```
+</CodeGroup>
+
+## Counting segment members
+
+`POST /v1/audience/segment/count`
+
+Before sending a broadcast, check how many contacts currently match a segment.
+This lets you sanity-check your audience size and catch over-broad or empty
+filters before a message goes out.
+
+<CodeGroup>
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/segment/count \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "segmentId": "seg_01j..." }'
+```
+
+```typescript TypeScript
+const { result } = await lath.audience.segment.count({
+  segmentId: "seg_01j...",
+});
+
+console.log(`${result.count} contacts will receive this broadcast`);
+```
+</CodeGroup>
+
+The response includes a `count` integer reflecting the number of contacts that
+match the segment's filter at the time of the request.
+
+## Listing segments
+
+`POST /v1/audience/segment/list`
+
+Retrieve all segments defined in your project. The response is paginated and
+returns each segment's `segmentId`, `name`, `filter`, and `createdAt`
+timestamp.
+
+<CodeGroup>
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/segment/list \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+```typescript TypeScript
+const { result } = await lath.audience.segment.list();
+
+for (const segment of result.segments) {
+  console.log(segment.segmentId, segment.name);
+}
+```
+</CodeGroup>
+
+## Deleting a segment
+
+`POST /v1/audience/segment/delete`
+
+Remove a segment definition from your project. Deleting a segment does not
+affect the contacts that were members of it — their records remain intact.
+
+<CodeGroup>
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/segment/delete \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "segmentId": "seg_01j..." }'
+```
+
+```typescript TypeScript
+await lath.audience.segment.delete({
+  segmentId: "seg_01j...",
+});
+```
+</CodeGroup>
+
+<Warning>
+  If a segment is attached to a scheduled broadcast or active automation,
+  deleting it will prevent that broadcast or automation from resolving its
+  recipient list. Remove the segment reference from any active sends before
+  deleting.
+</Warning>

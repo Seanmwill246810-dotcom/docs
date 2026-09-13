@@ -1,0 +1,468 @@
+---
+title: "Sign-In Methods Supported by Lath Auth"
+sidebarTitle: "Sign-In Methods"
+description: "Lath Auth supports email codes, magic links, passwords, passkeys, and social OAuth. Enable one method or combine several to match your product's security and UX needs."
+---
+
+Lath Auth supports five distinct sign-in methods that you can enable independently or in combination. Each method resolves to the same session token shape, so your downstream session-handling code stays consistent regardless of how a user authenticated. Choose the methods that match your product's security requirements and user experience goals.
+
+<Tabs>
+  <Tab title="Email Code (OTP)">
+    ## Email Code (OTP)
+
+    Send a 6-digit one-time code to an email address, then verify it in a second call. The code expires after 10 minutes. This is the simplest passwordless flow and works well for both sign-in and step-up verification.
+
+    **Good for:** passwordless sign-in, account verification steps, step-up MFA prompts
+
+    ### Endpoints
+
+    | Operation | Endpoint |
+    |-----------|----------|
+    | Send code | `POST /v1/auth/code/send` |
+    | Verify code | `POST /v1/auth/code/verify` |
+
+    ### Send a code
+
+    <ParamField body="email" type="string" required>
+      The email address to send the code to.
+    </ParamField>
+
+    <CodeGroup>
+    ```bash REST
+    curl -X POST https://platform.trylath.com/v1/auth/code/send \
+      -H "Authorization: Bearer lath_live_sk_..." \
+      -H "Content-Type: application/json" \
+      -d '{ "email": "ada@example.com" }'
+    ```
+
+    ```typescript TypeScript SDK
+    import { Lath } from "@trylath/sdk";
+
+    const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+    await lath.auth.code.send({ email: "ada@example.com" });
+    ```
+    </CodeGroup>
+
+    ```json Response
+    {
+      "activityId": "act_01j9...",
+      "result": {
+        "sent": true
+      }
+    }
+    ```
+
+    ### Verify the code
+
+    <CodeGroup>
+    ```bash REST
+    curl -X POST https://platform.trylath.com/v1/auth/code/verify \
+      -H "Authorization: Bearer lath_live_sk_..." \
+      -H "Content-Type: application/json" \
+      -d '{
+        "email": "ada@example.com",
+        "code": "847201"
+      }'
+    ```
+
+    ```typescript TypeScript SDK
+    const { result } = await lath.auth.code.verify({
+      email: "ada@example.com",
+      code: "847201",
+    });
+
+    const sessionToken = result.sessionToken;
+    ```
+    </CodeGroup>
+
+    ```json Response
+    {
+      "activityId": "act_01j9...",
+      "result": {
+        "sessionToken": "lath_sess_...",
+        "contactId": "con_01j9...",
+        "isNew": false
+      }
+    }
+    ```
+
+    <Note>
+      Codes are single-use. A new call to `code/send` invalidates any previously issued code for that email address.
+    </Note>
+  </Tab>
+
+  <Tab title="Magic Link">
+    ## Magic Link
+
+    Send a click-to-sign-in link to an email address. When the contact clicks the link, your app extracts the token from the URL query string and exchanges it for a session token. This flow requires no user input beyond the click.
+
+    **Good for:** low-friction first sign-in, invitation flows, email-based account activation
+
+    ### Endpoints
+
+    | Operation | Endpoint |
+    |-----------|----------|
+    | Send link | `POST /v1/auth/link/send` |
+    | Verify link token | `POST /v1/auth/link/verify` |
+
+    ### Send a magic link
+
+    <CodeGroup>
+    ```bash REST
+    curl -X POST https://platform.trylath.com/v1/auth/link/send \
+      -H "Authorization: Bearer lath_live_sk_..." \
+      -H "Content-Type: application/json" \
+      -d '{
+        "email": "ada@example.com",
+        "redirectUri": "https://app.example.com/auth/callback"
+      }'
+    ```
+
+    ```typescript TypeScript SDK
+    await lath.auth.link.send({
+      email: "ada@example.com",
+      redirectUri: "https://app.example.com/auth/callback",
+    });
+    ```
+    </CodeGroup>
+
+    ```json Response
+    {
+      "activityId": "act_01j9...",
+      "result": {
+        "sent": true
+      }
+    }
+    ```
+
+    ### Verify the token on your callback page
+
+    When the contact clicks the link, Lath appends a `token` parameter to your `redirectUri`. Extract it and call `link/verify`.
+
+    <CodeGroup>
+    ```bash REST
+    curl -X POST https://platform.trylath.com/v1/auth/link/verify \
+      -H "Authorization: Bearer lath_live_sk_..." \
+      -H "Content-Type: application/json" \
+      -d '{ "token": "mlnk_01j9..." }'
+    ```
+
+    ```typescript TypeScript SDK
+    // On your /auth/callback page:
+    const token = new URL(window.location.href).searchParams.get("token");
+
+    const { result } = await lath.auth.link.verify({ token });
+    const sessionToken = result.sessionToken;
+    ```
+    </CodeGroup>
+
+    ```json Response
+    {
+      "activityId": "act_01j9...",
+      "result": {
+        "sessionToken": "lath_sess_...",
+        "contactId": "con_01j9...",
+        "isNew": false
+      }
+    }
+    ```
+
+    <Warning>
+      Magic link tokens are single-use and expire after 15 minutes. Do not cache or reuse them.
+    </Warning>
+  </Tab>
+
+  <Tab title="Password">
+    ## Password
+
+    Create and verify passwords for contacts who prefer traditional credential-based sign-in. Lath also provides a complete forgot-password flow via a reset link.
+
+    **Good for:** traditional sign-in UX, enterprise apps, situations where users expect a username/password form
+
+    ### Endpoints
+
+    | Operation | Endpoint |
+    |-----------|----------|
+    | Set or update password | `POST /v1/auth/password/set` |
+    | Sign in with password | `POST /v1/auth/password/verify` |
+    | Send reset link | `POST /v1/auth/password/reset/send` |
+    | Complete reset | `POST /v1/auth/password/reset/complete` |
+
+    ### Set a password
+
+    Call `password/set` to create or update the password for a contact. Use your server-side secret key — never expose this call to the browser.
+
+    ```bash REST
+    curl -X POST https://platform.trylath.com/v1/auth/password/set \
+      -H "Authorization: Bearer lath_live_sk_..." \
+      -H "Content-Type: application/json" \
+      -d '{
+        "contactId": "con_01j9...",
+        "password": "correct-horse-battery-staple"
+      }'
+    ```
+
+    ### Sign in with a password
+
+    ```bash REST
+    curl -X POST https://platform.trylath.com/v1/auth/password/verify \
+      -H "Authorization: Bearer lath_live_sk_..." \
+      -H "Content-Type: application/json" \
+      -d '{
+        "email": "ada@example.com",
+        "password": "correct-horse-battery-staple"
+      }'
+    ```
+
+    ```json Response
+    {
+      "activityId": "act_01j9...",
+      "result": {
+        "sessionToken": "lath_sess_...",
+        "contactId": "con_01j9...",
+        "isNew": false
+      }
+    }
+    ```
+
+    ### Forgot-password flow
+
+    Send a reset link to the contact's email, then complete the reset with the token from the URL.
+
+    ```bash Send reset link
+    curl -X POST https://platform.trylath.com/v1/auth/password/reset/send \
+      -H "Authorization: Bearer lath_live_sk_..." \
+      -H "Content-Type: application/json" \
+      -d '{ "email": "ada@example.com" }'
+    ```
+
+    ```bash Complete reset
+    curl -X POST https://platform.trylath.com/v1/auth/password/reset/complete \
+      -H "Authorization: Bearer lath_live_sk_..." \
+      -H "Content-Type: application/json" \
+      -d '{
+        "token": "rst_01j9...",
+        "password": "new-secure-passphrase"
+      }'
+    ```
+
+    <Note>
+      After a successful password reset, call `POST /v1/auth/session/revoke-all` with the contact's ID to invalidate any previously active sessions.
+    </Note>
+  </Tab>
+
+  <Tab title="Passkey (WebAuthn)">
+    ## Passkey (WebAuthn)
+
+    Register and authenticate using browser-native passkeys — biometric sensors (Touch ID, Face ID, Windows Hello) or hardware security keys. Lath handles the WebAuthn ceremony server-side; your frontend uses the browser's `navigator.credentials` API with the challenge Lath returns.
+
+    **Good for:** high-security applications, consumer apps targeting modern browsers, phishing-resistant authentication
+
+    ### Endpoints
+
+    | Operation | Endpoint |
+    |-----------|----------|
+    | Begin registration | `POST /v1/auth/passkey/register/begin` |
+    | Complete registration | `POST /v1/auth/passkey/register/complete` |
+    | Begin authentication | `POST /v1/auth/passkey/auth/begin` |
+    | Complete authentication | `POST /v1/auth/passkey/auth/complete` |
+
+    ### Register a passkey
+
+    <Steps>
+      <Step title="Begin registration">
+        Call `register/begin` with the contact's ID to receive a WebAuthn `PublicKeyCredentialCreationOptions` challenge.
+
+        ```bash
+        curl -X POST https://platform.trylath.com/v1/auth/passkey/register/begin \
+          -H "Authorization: Bearer lath_live_sk_..." \
+          -H "Content-Type: application/json" \
+          -d '{ "contactId": "con_01j9..." }'
+        ```
+
+        ```json Response
+        {
+          "activityId": "act_01j9...",
+          "result": {
+            "registrationId": "reg_01j9...",
+            "options": { /* PublicKeyCredentialCreationOptions */ }
+          }
+        }
+        ```
+      </Step>
+
+      <Step title="Prompt the browser">
+        Pass the returned `options` to `navigator.credentials.create()` on your frontend.
+
+        ```typescript
+        const credential = await navigator.credentials.create({
+          publicKey: result.options,
+        });
+        ```
+      </Step>
+
+      <Step title="Complete registration">
+        Send the browser's credential response back to your server, then forward it to `register/complete`.
+
+        ```bash
+        curl -X POST https://platform.trylath.com/v1/auth/passkey/register/complete \
+          -H "Authorization: Bearer lath_live_sk_..." \
+          -H "Content-Type: application/json" \
+          -d '{
+            "registrationId": "reg_01j9...",
+            "credential": { /* credential from navigator.credentials.create */ }
+          }'
+        ```
+      </Step>
+    </Steps>
+
+    ### Authenticate with a passkey
+
+    The authentication ceremony mirrors registration: call `auth/begin` for a challenge, pass it to `navigator.credentials.get()`, then complete with `auth/complete` to receive a session token.
+
+    ```bash Begin authentication
+    curl -X POST https://platform.trylath.com/v1/auth/passkey/auth/begin \
+      -H "Authorization: Bearer lath_live_sk_..." \
+      -H "Content-Type: application/json" \
+      -d '{ "email": "ada@example.com" }'
+    ```
+
+    ```bash Complete authentication
+    curl -X POST https://platform.trylath.com/v1/auth/passkey/auth/complete \
+      -H "Authorization: Bearer lath_live_sk_..." \
+      -H "Content-Type: application/json" \
+      -d '{
+        "authId": "ath_01j9...",
+        "credential": { /* credential from navigator.credentials.get */ }
+      }'
+    ```
+
+    ```json Response from auth/complete
+    {
+      "activityId": "act_01j9...",
+      "result": {
+        "sessionToken": "lath_sess_...",
+        "contactId": "con_01j9..."
+      }
+    }
+    ```
+  </Tab>
+
+  <Tab title="Social OAuth">
+    ## Social OAuth
+
+    Let contacts sign in with their existing Google, Microsoft, or GitHub account. You supply your own OAuth app credentials so users see your app's name in the provider's consent screen. Lath handles the state parameter, PKCE, and token exchange.
+
+    **Good for:** consumer and developer tools, reducing sign-up friction, trusted identity from a third-party provider
+
+    ### Supported providers
+
+    | Provider | `provider` value |
+    |----------|-----------------|
+    | Google | `google` |
+    | Microsoft | `microsoft` |
+    | GitHub | `github` |
+
+    ### Endpoints
+
+    | Operation | Endpoint |
+    |-----------|----------|
+    | Configure a provider | `POST /v1/auth/oauth/app/set` |
+    | Begin OAuth flow | `POST /v1/auth/oauth/begin` |
+    | Complete OAuth flow | `POST /v1/auth/oauth/complete` |
+
+    ### Step 1 — Configure your OAuth app
+
+    Register your client credentials once per provider. Use your server-side secret key.
+
+    ```bash REST
+    curl -X POST https://platform.trylath.com/v1/auth/oauth/app/set \
+      -H "Authorization: Bearer lath_live_sk_..." \
+      -H "Content-Type: application/json" \
+      -d '{
+        "provider": "google",
+        "clientId": "123456789-abc.apps.googleusercontent.com",
+        "clientSecret": "GOCSPX-..."
+      }'
+    ```
+
+    ### Step 2 — Begin the OAuth flow
+
+    Call `oauth/begin` from your server when the user clicks "Sign in with Google". You'll receive an authorization URL to redirect the browser to.
+
+    <CodeGroup>
+    ```bash REST
+    curl -X POST https://platform.trylath.com/v1/auth/oauth/begin \
+      -H "Authorization: Bearer lath_live_sk_..." \
+      -H "Content-Type: application/json" \
+      -d '{
+        "provider": "google",
+        "redirectUri": "https://app.example.com/auth/oauth/callback"
+      }'
+    ```
+
+    ```typescript TypeScript SDK
+    const { result } = await lath.auth.oauth.begin({
+      provider: "google",
+      redirectUri: "https://app.example.com/auth/oauth/callback",
+    });
+
+    // Redirect the browser:
+    window.location.href = result.authorizationUrl;
+    ```
+    </CodeGroup>
+
+    ```json Response
+    {
+      "activityId": "act_01j9...",
+      "result": {
+        "authorizationUrl": "https://accounts.google.com/o/oauth2/auth?..."
+      }
+    }
+    ```
+
+    ### Step 3 — Complete the OAuth flow
+
+    After the provider redirects back to your `redirectUri`, extract the `code` and `state` query parameters and pass them to `oauth/complete`.
+
+    <CodeGroup>
+    ```bash REST
+    curl -X POST https://platform.trylath.com/v1/auth/oauth/complete \
+      -H "Authorization: Bearer lath_live_sk_..." \
+      -H "Content-Type: application/json" \
+      -d '{
+        "code": "4/0AfJohX...",
+        "state": "lath_state_..."
+      }'
+    ```
+
+    ```typescript TypeScript SDK
+    const params = new URL(window.location.href).searchParams;
+
+    const { result } = await lath.auth.oauth.complete({
+      code: params.get("code"),
+      state: params.get("state"),
+    });
+
+    const sessionToken = result.sessionToken;
+    ```
+    </CodeGroup>
+
+    ```json Response
+    {
+      "activityId": "act_01j9...",
+      "result": {
+        "sessionToken": "lath_sess_...",
+        "contactId": "con_01j9...",
+        "isNew": false,
+        "provider": "google"
+      }
+    }
+    ```
+
+    <Tip>
+      If a contact signs in with Google using the same email address they previously used for an email code or password, Lath merges the sign-in into the same contact record automatically.
+    </Tip>
+  </Tab>
+</Tabs>

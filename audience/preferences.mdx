@@ -1,0 +1,234 @@
+---
+title: "Hosted Preference Pages for Contact Consent Management"
+sidebarTitle: "Preferences"
+description: "Lath hosts a per-contact preference page where users manage their own email and SMS consent. Customize the look and copy using theme tokens via the API."
+---
+
+Lath hosts a preference page for each contact where they can see and update their own consent for every topic and channel. You link to it from your email footers, transactional messages, or account settings pages — you don't need to build your own unsubscribe flow or consent management UI. Every change a contact makes on the page is reflected immediately on their Audience record and flows through to all future sends.
+
+<Tip>
+  Generate the preference page URL at template render time by passing it as a
+  `variables` value, rather than hardcoding it in your template. Each contact
+  needs their own unique signed URL — a URL generated for one contact will not
+  work for another.
+</Tip>
+
+## Getting the preference page URL
+
+`POST /v1/audience/preferences/url`
+
+Request a signed URL for a specific contact's preference page. The URL is valid
+for a configurable period and grants the bearer access to view and update that
+contact's consent settings without requiring a separate sign-in.
+
+<ParamField body="contactId" type="string" required>
+  The ID of the contact whose preference page URL you want to generate.
+</ParamField>
+
+<CodeGroup>
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/preferences/url \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "contactId": "con_01j..." }'
+```
+
+```typescript TypeScript
+import { Lath } from "@trylath/sdk";
+
+const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+const { result } = await lath.audience.preferences.url({
+  contactId: "con_01j...",
+});
+
+console.log(result.url);
+// https://prefs.trylath.com/p/eyJ...
+```
+</CodeGroup>
+
+The response `result` includes a `url` string. Embed this as the `href` of a
+"Manage preferences" or "Unsubscribe" link in your email footer.
+
+## Embedding the URL in an email template
+
+Generate the preference URL server-side, then pass it as a template variable
+when triggering the send. This ensures every recipient gets their own correctly
+signed link.
+
+<CodeGroup>
+```typescript TypeScript
+const { result: prefResult } = await lath.audience.preferences.url({
+  contactId: contact.id,
+});
+
+await lath.email.send({
+  templateId: "tpl_order-confirmation",
+  contactId: contact.id,
+  variables: {
+    preferencesUrl: prefResult.url,
+    orderNumber: order.number,
+    totalAmount: order.total,
+  },
+});
+```
+
+```bash curl
+# Step 1 — get the signed URL
+PREFS_URL=$(curl -s -X POST https://platform.trylath.com/v1/audience/preferences/url \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "contactId": "con_01j..." }' \
+  | jq -r '.result.url')
+
+# Step 2 — send the email, passing the URL as a variable
+curl -X POST https://platform.trylath.com/v1/email/send \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"templateId\": \"tpl_order-confirmation\",
+    \"contactId\": \"con_01j...\",
+    \"variables\": {
+      \"preferencesUrl\": \"$PREFS_URL\",
+      \"orderNumber\": \"ORD-4821\"
+    }
+  }"
+```
+</CodeGroup>
+
+In your template source, reference the variable as `{{preferencesUrl}}`:
+
+```html Email template snippet
+<a href="{{preferencesUrl}}">Manage your email preferences</a>
+```
+
+## What the preference page shows
+
+When a contact opens their preference page, they see a clear summary of every
+topic they have a relationship with, organized so they can make informed choices
+about what they receive.
+
+<CardGroup cols={2}>
+  <Card title="Topic rows" icon="list">
+    Each messaging topic you have defined appears as a labeled row. Topics are
+    grouped by channel — email and SMS appear as separate columns on the same
+    row.
+  </Card>
+  <Card title="Per-channel toggles" icon="toggle-on">
+    Contacts can switch email and SMS consent on or off independently for each
+    topic. Changes save instantly without a page reload.
+  </Card>
+  <Card title="Transactional topics" icon="shield-check">
+    Topics marked as transactional are displayed but their toggles are disabled.
+    A short note explains that these messages are required for the service they
+    signed up for.
+  </Card>
+  <Card title="Global unsubscribe" icon="bell-slash">
+    A single "Unsubscribe from all marketing" action is available at the bottom
+    of the page, setting all non-transactional topics to opted-out in one click.
+  </Card>
+</CardGroup>
+
+## Customizing the page theme
+
+The preference page inherits your project's theme automatically. Update the
+visual design by calling `POST /v1/account/theme/set` with your chosen token
+values, then publish the changes with `POST /v1/account/theme/publish`. Changes
+take effect on the preference page immediately after publishing.
+
+### Theme tokens for the preference page
+
+<Accordion title="Color and surface tokens">
+  | Token | Purpose |
+  |---|---|
+  | `bg-canvas` | Page background color |
+  | `bg-surface` | Card / panel background |
+  | `fg-primary` | Body text and topic labels |
+  | `action-primary-bg` | Toggle active color and primary button background |
+  | `fg-on-action` | Text rendered on top of `action-primary-bg` |
+</Accordion>
+
+<Accordion title="Typography and shape tokens">
+  | Token | Purpose |
+  |---|---|
+  | `font-ui` | Font family for all preference page text |
+  | `radius-md` | Border radius for cards, toggles, and buttons |
+</Accordion>
+
+<Accordion title="Branding tokens">
+  | Token | Purpose |
+  |---|---|
+  | `logo-url` | Absolute URL of your logo image, displayed at the top of the page |
+</Accordion>
+
+### Copy keys
+
+Override the default English copy by providing values for these keys in
+`theme/set`:
+
+| Key | Default value |
+|---|---|
+| `signin.title` | `"Sign in to manage your preferences"` |
+| `signin.email.label` | `"Email address"` |
+| `signin.email.placeholder` | `"you@example.com"` |
+| `preferences.page.title` | `"Your communication preferences"` |
+| `preferences.page.subtitle` | `"Choose what you'd like to hear about"` |
+| `preferences.transactional.notice` | `"Required for your account — cannot be disabled"` |
+| `preferences.save.button` | `"Save preferences"` |
+
+<CodeGroup>
+```bash curl
+curl -X POST https://platform.trylath.com/v1/account/theme/set \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tokens": {
+      "bg-canvas": "#F9FAFB",
+      "bg-surface": "#FFFFFF",
+      "fg-primary": "#111827",
+      "action-primary-bg": "#6366F1",
+      "fg-on-action": "#FFFFFF",
+      "font-ui": "Inter, sans-serif",
+      "radius-md": "8px",
+      "logo-url": "https://cdn.example.com/logo.png"
+    },
+    "copy": {
+      "preferences.page.title": "Your notification settings",
+      "preferences.page.subtitle": "Control exactly what we send you"
+    }
+  }'
+
+# Publish the changes to make them live
+curl -X POST https://platform.trylath.com/v1/account/theme/publish \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+```typescript TypeScript
+await lath.account.theme.set({
+  tokens: {
+    "bg-canvas": "#F9FAFB",
+    "bg-surface": "#FFFFFF",
+    "fg-primary": "#111827",
+    "action-primary-bg": "#6366F1",
+    "fg-on-action": "#FFFFFF",
+    "font-ui": "Inter, sans-serif",
+    "radius-md": "8px",
+    "logo-url": "https://cdn.example.com/logo.png",
+  },
+  copy: {
+    "preferences.page.title": "Your notification settings",
+    "preferences.page.subtitle": "Control exactly what we send you",
+  },
+});
+
+await lath.account.theme.publish();
+```
+</CodeGroup>
+
+<Note>
+  Theme changes are staged when you call `theme/set` and only go live after you
+  call `theme/publish`. This lets you batch multiple token updates into a single
+  atomic publish rather than pushing partial changes to production.
+</Note>

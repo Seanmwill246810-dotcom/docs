@@ -1,0 +1,52 @@
+---
+title: "Lath Documentation — Auth, Email, and SMS Platform"
+sidebarTitle: "Home"
+description: "Lath unifies authentication, email, and SMS on a single contact record. One API, one consent system, and one spending cap for all channels."
+---
+
+Lath is a unified communications platform that brings authentication, email, and SMS together on a single contact record. Instead of stitching together a separate identity provider, email vendor, and SMS carrier — each with their own notion of who a user is — Lath gives you one API, one consent system, and one spending cap that covers everything. Every operation is available over REST, the TypeScript SDK (`@trylath/sdk`), the MCP interface, the CLI, or the dashboard.
+
+<CardGroup cols={2}>
+  <Card title="Introduction" icon="book-open" href="/introduction">
+    Learn what Lath is, how the unified contact model works, and why it eliminates sync code.
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Create an account, grab your API keys, set a spending cap, and send your first message in under 10 minutes.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/overview">
+    Explore all 206 operations across auth, email, SMS, audience, developers, account, and billing.
+  </Card>
+  <Card title="SDKs & Integrations" icon="box" href="/developers/sdks">
+    Use the TypeScript SDK, CLI, or MCP interface to integrate Lath into your stack.
+  </Card>
+</CardGroup>
+
+## Three products, one contact
+
+Every auth event, every email, and every SMS is anchored to the same contact row. There is no import job, no webhook-driven sync, and no risk of consent state drifting between systems.
+
+<CardGroup cols={3}>
+  <Card title="Auth" icon="lock" href="/auth/overview">
+    Email codes, magic links, passwords, passkeys, OAuth (Google, Microsoft, GitHub), sessions, and organizations — all in one place.
+  </Card>
+  <Card title="Email" icon="envelope" href="/email/overview">
+    Transactional sends, multi-language templates, broadcasts, automations, and inbound handling with full deliverability tooling.
+  </Card>
+  <Card title="SMS" icon="message-sms" href="/sms/overview">
+    Outbound and inbound SMS with quiet-hours enforcement, STOP/HELP/START keyword handling, and carrier registration built in.
+  </Card>
+</CardGroup>
+
+## Get up and running
+
+<Steps>
+  <Step title="Sign up for a Lath account">
+    Create your account at [platform.trylath.com](https://platform.trylath.com) or via the API. No credit card is required to start. You'll receive both live and test API keys immediately.
+  </Step>
+  <Step title="Grab your API keys">
+    Copy your secret key (`lath_live_sk…` for production, `lath_test_sk…` for development) from the dashboard. Use test keys while you build — they're safe to experiment with and won't send real messages or incur charges.
+  </Step>
+  <Step title="Send your first email or SMS">
+    Set a monthly spending cap, then call `POST /v1/email/send` or `POST /v1/sms/send` with your contact's address and a topic. Lath checks consent, quiet hours, and the spending cap automatically before every send.
+  </Step>
+</Steps>

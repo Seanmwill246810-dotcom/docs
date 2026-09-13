@@ -1,0 +1,286 @@
+---
+title: "Email Template Endpoints: Create, Publish, and Manage"
+sidebarTitle: "Templates"
+description: "REST endpoints to create, update, and publish email templates. Supports multiple locales, variable substitution, and a versioned draft/publish lifecycle."
+---
+
+Email templates in Lath follow a draft/publish workflow. You write and iterate on the draft version freely, then publish when it is ready to send. Published versions are immutable — messages already in the queue always render against the version that was live when they were accepted. Templates can carry multiple locale variants so a single `send` call can automatically deliver in the recipient's language.
+
+## POST /v1/email/template/set
+
+Create a new template or update the draft of an existing one. Each call targets a specific locale (defaulting to `en`). Calling `set` on a template that already exists replaces the draft without touching the published version.
+
+### Request
+
+<ParamField body="name" type="string" required>
+  Unique template identifier within your project (e.g. `"invoice-paid"`). Use lowercase kebab-case.
+</ParamField>
+
+<ParamField body="subject" type="string" required>
+  Email subject line for this template. May include `{{ variable }}` placeholders.
+</ParamField>
+
+<ParamField body="html" type="string" required>
+  Full HTML body of the email. Use `{{ variableName }}` syntax for variable substitution.
+</ParamField>
+
+<ParamField body="text" type="string">
+  Plain-text fallback body. Recommended for deliverability. If omitted, Lath auto-generates a stripped version from the HTML.
+</ParamField>
+
+<ParamField body="locale" type="string">
+  BCP 47 locale tag for this variant (e.g. `"en"`, `"fr"`, `"de"`). Defaults to `"en"`.
+</ParamField>
+
+<ParamField body="variables" type="array">
+  Array of variable name strings declared in this template (e.g. `["firstName", "invoiceTotal"]`). Used for validation at send time.
+</ParamField>
+
+### Response
+
+<ResponseField name="template.name" type="string">
+  The template name as stored.
+</ResponseField>
+
+<ResponseField name="template.locale" type="string">
+  The locale this variant targets.
+</ResponseField>
+
+<ResponseField name="template.version" type="integer">
+  The new draft version number.
+</ResponseField>
+
+<ResponseField name="template.status" type="string">
+  Always `"draft"` after a `set` call.
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/email/template/set \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "invoice-paid",
+    "subject": "Your invoice {{ invoiceNumber }} is ready",
+    "html": "<h1>Hi {{ firstName }}</h1><p>Invoice total: ${{ invoiceTotal }}</p>",
+    "text": "Hi {{ firstName }}, your invoice total is ${{ invoiceTotal }}.",
+    "locale": "en",
+    "variables": ["firstName", "invoiceTotal", "invoiceNumber"]
+  }'
+```
+
+```typescript TypeScript SDK
+import { LathClient } from "@trylath/sdk";
+
+const lath = new LathClient({ apiKey: process.env.LATH_SECRET_KEY });
+
+const { result } = await lath.email.templates.set({
+  name: "invoice-paid",
+  subject: "Your invoice {{ invoiceNumber }} is ready",
+  html: "<h1>Hi {{ firstName }}</h1><p>Invoice total: ${{ invoiceTotal }}</p>",
+  text: "Hi {{ firstName }}, your invoice total is ${{ invoiceTotal }}.",
+  locale: "en",
+  variables: ["firstName", "invoiceTotal", "invoiceNumber"],
+});
+
+console.log("Draft version:", result.template.version);
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/email/template/publish
+
+Promote the current draft to the published version. Once published, new `send` calls pick up this version. Existing queued messages are unaffected.
+
+### Request
+
+<ParamField body="name" type="string" required>
+  Name of the template to publish.
+</ParamField>
+
+<ParamField body="locale" type="string">
+  Locale variant to publish. Omit to publish all locales simultaneously.
+</ParamField>
+
+### Response
+
+<ResponseField name="template.name" type="string">
+  The template name.
+</ResponseField>
+
+<ResponseField name="template.publishedVersion" type="integer">
+  The version number that is now live.
+</ResponseField>
+
+<ResponseField name="template.publishedAt" type="string">
+  ISO 8601 timestamp of when the template was published.
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/email/template/publish \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "invoice-paid", "locale": "en" }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.email.templates.publish({
+  name: "invoice-paid",
+  locale: "en",
+});
+
+console.log("Published version:", result.template.publishedVersion);
+```
+
+</CodeGroup>
+
+<Warning>
+  You cannot publish a template that has no draft content. Call `/v1/email/template/set` first.
+</Warning>
+
+---
+
+## POST /v1/email/template/get
+
+Retrieve the draft and published content for a template variant.
+
+### Request
+
+<ParamField body="name" type="string" required>
+  Template name to retrieve.
+</ParamField>
+
+<ParamField body="locale" type="string">
+  Locale to fetch. Defaults to `"en"`.
+</ParamField>
+
+### Response
+
+The response contains two top-level fields — `draft` and `published` — each with `subject`, `html`, `text`, `version`, and `updatedAt`. Either field may be `null` if that state does not yet exist.
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/email/template/get \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "invoice-paid", "locale": "en" }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.email.templates.get({
+  name: "invoice-paid",
+  locale: "en",
+});
+
+console.log("Published HTML:", result.published?.html);
+console.log("Draft version:", result.draft?.version);
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/email/template/list
+
+List all templates in your project with their current version numbers.
+
+### Request
+
+This endpoint takes no request body.
+
+### Response
+
+<ResponseField name="templates" type="array">
+  Array of template summary objects.
+
+  <Expandable title="template fields">
+    <ResponseField name="templates[].name" type="string">
+      Template name.
+    </ResponseField>
+    <ResponseField name="templates[].locales" type="array">
+      Array of BCP 47 locale strings for which a variant exists.
+    </ResponseField>
+    <ResponseField name="templates[].publishedVersion" type="integer | null">
+      The current published version, or `null` if never published.
+    </ResponseField>
+    <ResponseField name="templates[].draftVersion" type="integer | null">
+      The current draft version, or `null` if no unpublished changes exist.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/email/template/list \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.email.templates.list();
+
+for (const tpl of result.templates) {
+  console.log(`${tpl.name} — published: ${tpl.publishedVersion ?? "never"}`);
+}
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/email/template/delete
+
+Delete a template variant. This removes both the draft and the published version for the specified locale.
+
+### Request
+
+<ParamField body="name" type="string" required>
+  Template name to delete.
+</ParamField>
+
+<ParamField body="locale" type="string">
+  Locale variant to delete. Omit to delete the template and all its locale variants.
+</ParamField>
+
+<Warning>
+  Deleting a published template does not recall messages already queued against it. However, any future `send` call referencing the deleted template name will return a `404` error.
+</Warning>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/email/template/delete \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "invoice-paid", "locale": "en" }'
+```
+
+```typescript TypeScript SDK
+await lath.email.templates.delete({ name: "invoice-paid", locale: "en" });
+```
+
+</CodeGroup>
+
+---
+
+## Template variable syntax
+
+Use double-curly-brace syntax in both `subject` and `html`/`text` fields.
+
+```html
+<p>Hi {{ firstName }}, your total is ${{ invoiceTotal }}.</p>
+```
+
+Variable names must be declared in the `variables` array when calling `set`. At send time, Lath validates that all declared variables are present in the `variables` object passed to `/v1/email/send`.
+
+<Tip>
+  Keep variable names camelCase and descriptive. Avoid generic names like `value1` — they make templates harder to maintain.
+</Tip>

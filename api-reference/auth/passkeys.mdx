@@ -1,0 +1,272 @@
+---
+title: "Lath Passkey and WebAuthn Authentication Endpoints"
+sidebarTitle: "Passkeys"
+description: "REST endpoints for registering and authenticating with passkeys in Lath Auth. Two-step flows return WebAuthn challenge objects for the browser."
+---
+
+Passkeys let your users sign in with Face ID, Touch ID, Windows Hello, or a hardware security key — no password required. Lath handles the server-side WebAuthn ceremony while your browser code calls the standard `navigator.credentials` API. Both registration and authentication follow a two-step pattern: first fetch a challenge from Lath, then pass the browser's credential response back to complete the flow.
+
+<Note>
+  Passkeys require a secure origin (`https://` or `localhost`). Make sure your `redirectUri` and relying party ID match your deployment domain.
+</Note>
+
+---
+
+## Registration
+
+### Begin passkey registration
+
+`POST /v1/auth/passkey/register/begin`
+
+Generates a WebAuthn `PublicKeyCredentialCreationOptions` challenge for a specific contact. Pass the returned `challenge` object directly to `navigator.credentials.create()` in the browser.
+
+#### Request
+
+<ParamField body="contactId" type="string" required>
+  The Lath contact ID of the user registering a passkey. The contact must already exist — sign them in first via another method if this is a new user.
+</ParamField>
+
+#### Response
+
+<ResponseField name="challenge" type="object">
+  A `PublicKeyCredentialCreationOptions` object. Pass this directly to `navigator.credentials.create({ publicKey: challenge })` in the browser. Do not modify the object before passing it.
+</ResponseField>
+
+---
+
+### Complete passkey registration
+
+`POST /v1/auth/passkey/register/complete`
+
+Registers the new passkey by submitting the browser's credential response. On success, the passkey is saved to the contact's record and can be used for future authentication.
+
+#### Request
+
+<ParamField body="contactId" type="string" required>
+  The same contact ID used in the `begin` call.
+</ParamField>
+
+<ParamField body="credential" type="object" required>
+  The `PublicKeyCredential` object returned by `navigator.credentials.create()`, serialized to JSON.
+</ParamField>
+
+#### Response
+
+<ResponseField name="passkey" type="object">
+  <Expandable title="passkey fields">
+    <ResponseField name="id" type="string">
+      The unique identifier for this passkey. Use this to delete the passkey later.
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      A human-readable name for the passkey derived from the authenticator (e.g. `"Touch ID"`).
+    </ResponseField>
+    <ResponseField name="createdAt" type="string">
+      ISO 8601 timestamp of when the passkey was registered.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+
+```typescript Browser (registration flow)
+// Step 1 — Fetch the challenge from your server
+// Your server calls POST /v1/auth/passkey/register/begin and forwards the result
+const beginRes = await fetch("/api/passkey/register/begin", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ contactId: "cnt_xyz789" }),
+});
+const { challenge } = await beginRes.json();
+
+// Step 2 — Create the credential in the browser
+const credential = await navigator.credentials.create({ publicKey: challenge });
+
+// Step 3 — Send the credential back to your server
+// Your server calls POST /v1/auth/passkey/register/complete and forwards the result
+const completeRes = await fetch("/api/passkey/register/complete", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    contactId: "cnt_xyz789",
+    credential: JSON.parse(JSON.stringify(credential)),
+  }),
+});
+const { passkey } = await completeRes.json();
+console.log("Registered passkey:", passkey.name);
+```
+
+```typescript Server (TypeScript SDK)
+// Begin — returns challenge to forward to browser
+const { result: begin } = await lath.auth.passkey.register.begin({
+  contactId: "cnt_xyz789",
+});
+// Send begin.challenge to the browser
+
+// Complete — after browser returns the credential
+const { result: complete } = await lath.auth.passkey.register.complete({
+  contactId: "cnt_xyz789",
+  credential: credentialFromBrowser,
+});
+console.log("Registered:", complete.passkey.name);
+```
+
+</CodeGroup>
+
+---
+
+## Authentication
+
+### Begin passkey authentication
+
+`POST /v1/auth/passkey/auth/begin`
+
+Generates a WebAuthn `PublicKeyCredentialRequestOptions` challenge. Pass the returned `challenge` to `navigator.credentials.get()` in the browser. Provide `email` to narrow the challenge to a specific contact's passkeys, or omit it to allow any registered passkey (useful for a "passkey autofill" experience).
+
+#### Request
+
+<ParamField body="email" type="string">
+  Optional. The email address of the contact signing in. Providing this narrows the list of allowed credentials, which improves matching on multi-device setups.
+</ParamField>
+
+#### Response
+
+<ResponseField name="challenge" type="object">
+  A `PublicKeyCredentialRequestOptions` object. Pass this directly to `navigator.credentials.get({ publicKey: challenge })` in the browser.
+</ResponseField>
+
+---
+
+### Complete passkey authentication
+
+`POST /v1/auth/passkey/auth/complete`
+
+Verifies the passkey assertion returned by the browser and issues a Lath session token.
+
+#### Request
+
+<ParamField body="credential" type="object" required>
+  The `PublicKeyCredential` object returned by `navigator.credentials.get()`, serialized to JSON.
+</ParamField>
+
+#### Response
+
+<ResponseField name="sessionToken" type="string">
+  The authenticated Lath session token.
+</ResponseField>
+
+<ResponseField name="contactId" type="string">
+  The Lath contact ID of the user who authenticated.
+</ResponseField>
+
+<CodeGroup>
+
+```typescript Browser (authentication flow)
+// Step 1 — Fetch the challenge from your server
+const beginRes = await fetch("/api/passkey/auth/begin", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ email: "ada@example.com" }),
+});
+const { challenge } = await beginRes.json();
+
+// Step 2 — Get the credential assertion from the browser
+const credential = await navigator.credentials.get({ publicKey: challenge });
+
+// Step 3 — Complete authentication on your server
+const completeRes = await fetch("/api/passkey/auth/complete", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    credential: JSON.parse(JSON.stringify(credential)),
+  }),
+});
+const { sessionToken, contactId } = await completeRes.json();
+console.log("Signed in as:", contactId);
+```
+
+```typescript Server (TypeScript SDK)
+// Begin — returns challenge to forward to browser
+const { result: begin } = await lath.auth.passkey.auth.begin({
+  email: "ada@example.com",
+});
+// Send begin.challenge to the browser
+
+// Complete — after browser returns the credential
+const { result: complete } = await lath.auth.passkey.auth.complete({
+  credential: credentialFromBrowser,
+});
+console.log("Session token:", complete.sessionToken);
+```
+
+</CodeGroup>
+
+---
+
+## Manage passkeys
+
+### List passkeys for a contact
+
+`POST /v1/auth/passkey/list`
+
+Returns all passkeys registered for a contact. Use this to build a passkey management UI in your settings page.
+
+#### Request
+
+<ParamField body="contactId" type="string" required>
+  The Lath contact ID whose passkeys you want to list.
+</ParamField>
+
+#### Response
+
+<ResponseField name="passkeys" type="array">
+  An array of passkey objects.
+
+  <Expandable title="passkey fields">
+    <ResponseField name="id" type="string">
+      The unique passkey ID.
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      Human-readable authenticator name.
+    </ResponseField>
+    <ResponseField name="createdAt" type="string">
+      ISO 8601 timestamp of registration.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+### Delete a passkey
+
+`POST /v1/auth/passkey/delete`
+
+Permanently removes a passkey from a contact's record. The user will no longer be able to sign in with that passkey. This action cannot be undone.
+
+#### Request
+
+<ParamField body="passkeyId" type="string" required>
+  The ID of the passkey to delete, obtained from `/v1/auth/passkey/list`.
+</ParamField>
+
+#### Response
+
+Returns an empty `result` object on success.
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/auth/passkey/delete \
+  -H "Authorization: Bearer lath_live_sk..." \
+  -H "Content-Type: application/json" \
+  -d '{ "passkeyId": "pk_abc123" }'
+```
+
+```typescript TypeScript SDK
+await lath.auth.passkey.delete({ passkeyId: "pk_abc123" });
+```
+
+</CodeGroup>
+
+<Warning>
+  Deleting a passkey is irreversible. If the contact has no other sign-in methods configured, they will be locked out of their account. Ensure at least one alternative method (e.g. email code or password) is available before deleting.
+</Warning>

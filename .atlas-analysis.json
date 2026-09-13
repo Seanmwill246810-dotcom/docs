@@ -1,0 +1,165 @@
+{
+  "projectType": "api-service",
+  "projectName": "Lath",
+  "projectDescription": "Lath is an auth, email, and SMS platform that unifies all three products on a single contact record — with one consent system, one spending cap, and one API reachable over REST, MCP, SDK, CLI, or dashboard.",
+  "theme": "luma",
+  "primaryColor": "#ef7025",
+  "lightColor": "#eec9bc",
+  "darkColor": "#4fa1ab",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "authentication"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/contacts",
+              "concepts/consent",
+              "concepts/environments",
+              "concepts/idempotency"
+            ]
+          },
+          {
+            "group": "Auth",
+            "pages": [
+              "auth/overview",
+              "auth/sign-in-methods",
+              "auth/sessions",
+              "auth/organizations"
+            ]
+          },
+          {
+            "group": "Email",
+            "pages": [
+              "email/overview",
+              "email/send",
+              "email/templates",
+              "email/automations",
+              "email/broadcasts"
+            ]
+          },
+          {
+            "group": "SMS",
+            "pages": [
+              "sms/overview",
+              "sms/send",
+              "sms/keywords",
+              "sms/registration"
+            ]
+          },
+          {
+            "group": "Audience",
+            "pages": [
+              "audience/contacts",
+              "audience/segments",
+              "audience/preferences"
+            ]
+          },
+          {
+            "group": "Developers",
+            "pages": [
+              "developers/api-keys",
+              "developers/webhooks",
+              "developers/sdks",
+              "developers/mcp"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api-reference/overview"
+            ]
+          },
+          {
+            "group": "Auth",
+            "pages": [
+              "api-reference/auth/sign-in",
+              "api-reference/auth/sessions",
+              "api-reference/auth/oauth",
+              "api-reference/auth/passkeys",
+              "api-reference/auth/organizations"
+            ]
+          },
+          {
+            "group": "Email",
+            "pages": [
+              "api-reference/email/send",
+              "api-reference/email/templates",
+              "api-reference/email/automations",
+              "api-reference/email/broadcasts"
+            ]
+          },
+          {
+            "group": "SMS",
+            "pages": [
+              "api-reference/sms/send",
+              "api-reference/sms/templates",
+              "api-reference/sms/numbers"
+            ]
+          },
+          {
+            "group": "Audience",
+            "pages": [
+              "api-reference/audience/contacts",
+              "api-reference/audience/consent",
+              "api-reference/audience/segments"
+            ]
+          },
+          {
+            "group": "Account & Billing",
+            "pages": [
+              "api-reference/account/overview",
+              "api-reference/billing/spending-cap"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Unified contact record shared across auth, email, and SMS",
+    "Single consent system covering both email and SMS channels",
+    "Spending cap enforced before any message is queued (hard 402 stop)",
+    "Live and test environments created automatically at account signup",
+    "Every operation reachable via REST, MCP, TypeScript SDK, CLI, or dashboard",
+    "Email and SMS automations with branching, wait steps, and property logic",
+    "Social sign-in (Google, Microsoft, GitHub), passkeys, magic links, and email codes",
+    "Idempotency keys on all mutating endpoints to prevent double-sends",
+    "Hosted sign-in and preference pages with customizable theme tokens",
+    "Webhook delivery with HMAC signatures and automatic retry schedule"
+  ],
+  "publicApiSurface": [
+    "POST /v1/account/signup",
+    "POST /v1/auth/* (67 operations: sign-in codes, magic links, passwords, passkeys, OAuth, sessions, organizations)",
+    "POST /v1/email/send",
+    "POST /v1/email/template/set + publish",
+    "POST /v1/email/automation/create + update",
+    "POST /v1/email/broadcast/create + send",
+    "POST /v1/sms/send",
+    "POST /v1/sms/template/set + publish",
+    "POST /v1/audience/contact/create + update",
+    "POST /v1/audience/consent/grant + revoke",
+    "POST /v1/audience/segment/create",
+    "POST /v1/developers/key/create + list",
+    "POST /v1/developers/webhook/create + list",
+    "POST /v1/billing/cap/set",
+    "POST /v1/account/theme/set + publish",
+    "@trylath/sdk (TypeScript/Node SDK)",
+    "@trylath/react (React component library)",
+    "MCP server at /v1/mcp"
+  ]
+}

@@ -1,0 +1,177 @@
+---
+title: "Use Lath with AI Coding Agents Using the MCP Server"
+sidebarTitle: "MCP"
+description: "Connect Claude Code, Cursor, or Codex to Lath via MCP. Configure in one JSON block and direct your agent with plain-language instructions."
+---
+
+Lath exposes every API operation as an MCP (Model Context Protocol) tool at `https://platform.trylath.com/v1/mcp`. Connect any MCP-compatible agent — Claude Code, Cursor, Codex, or your own — and it can configure your account, send messages, create templates, manage contacts, and more, all by reading the tool schemas and acting on your plain-language instructions. No prompt engineering or API documentation required on your end.
+
+## Connect to your MCP client
+
+Add a `lath` server entry to your MCP configuration file. The exact file path depends on which client you're using.
+
+<Tabs>
+  <Tab title="Claude Code">
+    Add to `~/.config/claude/mcp.json`:
+
+    ```json
+    {
+      "mcpServers": {
+        "lath": {
+          "url": "https://platform.trylath.com/v1/mcp",
+          "headers": {
+            "Authorization": "Bearer lath_live_sk..."
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Cursor">
+    Add to `.cursor/mcp.json` in your project root:
+
+    ```json
+    {
+      "mcpServers": {
+        "lath": {
+          "url": "https://platform.trylath.com/v1/mcp",
+          "headers": {
+            "Authorization": "Bearer lath_live_sk..."
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Codex / custom client">
+    Any MCP-compatible client that supports remote HTTP servers with custom headers uses the same structure:
+
+    ```json
+    {
+      "mcpServers": {
+        "lath": {
+          "url": "https://platform.trylath.com/v1/mcp",
+          "headers": {
+            "Authorization": "Bearer lath_live_sk..."
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+Reload or restart your client after saving the config. The agent will discover all available Lath tools automatically on the next session.
+
+<Warning>
+  Store your API key in your secrets manager or OS keychain rather than committing it directly to `.cursor/mcp.json` or any config file that ends up in version control. If you're on a team, each developer should use their own key.
+</Warning>
+
+## What agents can do
+
+An agent with a connected Lath key can perform any operation covered by that key's permission scopes. With a full secret key, a connected agent can:
+
+<CardGroup cols={2}>
+  <Card title="Configure auth" icon="lock">
+    Enable sign-in methods, configure OAuth app credentials, manage sessions and organizations.
+  </Card>
+  <Card title="Build messaging" icon="envelope">
+    Create and publish email and SMS templates, set up automations, configure quiet hours.
+  </Card>
+  <Card title="Send messages" icon="paper-plane">
+    Send transactional email and SMS, trigger broadcasts, preview templates.
+  </Card>
+  <Card title="Manage contacts" icon="users">
+    Create contacts, grant and revoke consent, build segments, set up preference pages.
+  </Card>
+  <Card title="Register webhooks" icon="webhook">
+    Create and delete webhook endpoints, inspect delivery history, troubleshoot failures.
+  </Card>
+  <Card title="Monitor delivery" icon="chart-bar">
+    Check message delivery status, read bounce and complaint data, view billing usage.
+  </Card>
+</CardGroup>
+
+## Scope agent access
+
+Give each agent its own API key limited to only what it needs to do. Create a scoped key with `POST /v1/developers/key/create`, then use that key in the MCP config instead of your master secret key.
+
+<Steps>
+  <Step title="Create a scoped key for the agent">
+    ```bash
+    curl -X POST https://platform.trylath.com/v1/developers/key/create \
+      -H "Authorization: Bearer $LATH_SECRET_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "cursor-agent",
+        "permissions": ["email:manage", "email:send"]
+      }'
+    ```
+
+    Store the returned key value — it is only shown once.
+  </Step>
+  <Step title="Put the scoped key in your MCP config">
+    Replace the key in your MCP configuration with the new scoped key. The agent will only see and be able to call tools covered by those permissions.
+
+    ```json
+    {
+      "mcpServers": {
+        "lath": {
+          "url": "https://platform.trylath.com/v1/mcp",
+          "headers": {
+            "Authorization": "Bearer lath_live_sk_cursor_agent..."
+          }
+        }
+      }
+    }
+    ```
+  </Step>
+  <Step title="Verify the tool list">
+    Ask the agent to list available Lath tools. You should see only operations in the scopes you granted.
+  </Step>
+</Steps>
+
+<Tip>
+  Agents read each tool's full input and output schema before calling it — they don't need additional documentation beyond what the schema provides. Connect the server, describe what you want in plain language, and the agent figures out which tools to call and in what order.
+</Tip>
+
+## Example prompts
+
+Once connected, you can direct agents with natural language. Here are some examples of what you can ask:
+
+<Accordion title="Set up a welcome email flow">
+  > "Create an email template called 'welcome' with a subject of 'Welcome to Acme' and a body that greets the user by first name. Then create an automation that sends it when a contact is created with the topic 'transactional'."
+</Accordion>
+
+<Accordion title="Inspect a delivery problem">
+  > "The contact cnt_01hx9 says they never received our welcome email sent yesterday. Check the delivery status for that contact and tell me if it bounced or was blocked."
+</Accordion>
+
+<Accordion title="Configure OAuth sign-in">
+  > "Enable Google OAuth for sign-in. Here are the client ID and secret from our Google Cloud console: [paste values]. Set the redirect URI to https://app.acme.com/auth/callback."
+</Accordion>
+
+<Accordion title="Register a webhook">
+  > "Register a webhook endpoint at https://app.acme.com/webhooks/lath that listens for email.bounced and sms.opted_out events. Name it 'crm-sync'."
+</Accordion>
+
+## Use test mode during development
+
+Use a `lath_test_sk…` key in your development MCP config. Test-mode operations run against isolated test data and are free. Switch to a `lath_live_sk…` key (ideally scoped) when you're ready to work against real data.
+
+```json
+{
+  "mcpServers": {
+    "lath": {
+      "url": "https://platform.trylath.com/v1/mcp",
+      "headers": {
+        "Authorization": "Bearer lath_test_sk..."
+      }
+    }
+  }
+}
+```
+
+<Note>
+  The MCP server itself is environment-aware — a test key automatically routes all tool calls through Lath's test environment, so you can iterate safely without affecting live contacts, deliveries, or billing.
+</Note>

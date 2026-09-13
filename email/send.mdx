@@ -1,0 +1,177 @@
+---
+title: "Sending Transactional Email with the Lath Email API"
+sidebarTitle: "Send Email"
+description: "POST to /v1/email/send to deliver a single email using a published template. Pass variables, override the subject, and handle suppressed sends."
+---
+
+Sending a transactional email in Lath means posting one request to `/v1/email/send` with a recipient address, a published template name, and a consent topic. Lath runs the send through four checks in sequence — suppression, consent, quiet hours, and spending cap — before queuing delivery. The response tells you whether the message was queued or suppressed — suppressed sends are not errors and should be handled in your application logic.
+
+## Endpoint
+
+```text
+POST https://platform.trylath.com/v1/email/send
+```
+
+## Request fields
+
+<ParamField body="to" type="string" required>
+  The recipient's email address. Must be a valid RFC 5321 address.
+</ParamField>
+
+<ParamField body="template" type="string" required>
+  The slug name of a published template (for example, `"welcome"` or `"password-reset"`). Sending to an unpublished template returns an error.
+</ParamField>
+
+<ParamField body="topic" type="string" required>
+  The consent topic this message belongs to (for example, `"transactional"` or `"marketing"`). The contact must have granted email consent for this topic. If they haven't, the send returns `status: "suppressed"` with `reason: "no_consent"`.
+</ParamField>
+
+<ParamField body="from" type="string" required>
+  The sender address. Must be on a verified sending domain configured in your Lath account (for example, `"hello@yourcompany.com"`).
+</ParamField>
+
+<ParamField body="subject" type="string">
+  Overrides the subject line defined in the template. Maximum 300 characters. Use this to personalise subjects without creating a new template version.
+</ParamField>
+
+<ParamField body="variables" type="object">
+  Key/value pairs injected into the template at render time. Values replace `{{ variableName }}` placeholders in the template HTML and text body. Values may be strings, numbers, or booleans.
+</ParamField>
+
+<ParamField body="sendAfter" type="string">
+  An ISO 8601 datetime string (for example, `"2025-09-01T09:00:00Z"`). When provided, Lath holds the message and delivers it at or after this time. Omit to send immediately.
+</ParamField>
+
+## Response fields
+
+<ResponseField name="activityId" type="string">
+  A unique identifier for the API activity. Use this for support requests or audit log lookups.
+</ResponseField>
+
+<ResponseField name="result.messageId" type="string">
+  UUID of the queued or suppressed message. Present on both `queued` and `suppressed` statuses.
+</ResponseField>
+
+<ResponseField name="result.status" type="string">
+  Either `"queued"` (delivery is in progress) or `"suppressed"` (a policy check blocked the send).
+</ResponseField>
+
+<ResponseField name="result.to" type="string">
+  The recipient email address as provided in the request.
+</ResponseField>
+
+<ResponseField name="result.template" type="string">
+  The slug name of the template used for this send.
+</ResponseField>
+
+<ResponseField name="result.templateVersion" type="string">
+  The version identifier of the published template that was rendered.
+</ResponseField>
+
+<ResponseField name="result.sendAfter" type="string">
+  The ISO 8601 datetime at which the message is scheduled to deliver. Present only when `sendAfter` was provided in the request.
+</ResponseField>
+
+<ResponseField name="result.blocked" type="object">
+  Present only when `status` is `"suppressed"`. Contains two string fields: `reason` (machine-readable code) and `fix` (human-readable remediation guidance).
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/email/send \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: send-welcome-user-7291" \
+  -d '{
+    "to": "user@example.com",
+    "template": "welcome",
+    "topic": "transactional",
+    "from": "hello@yourcompany.com",
+    "variables": { "firstName": "Avery" }
+  }'
+```
+
+```typescript TypeScript SDK
+import { Lath } from "@trylath/sdk";
+
+const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+const { result } = await lath.email.send({
+  to: "user@example.com",
+  template: "welcome",
+  topic: "transactional",
+  from: "hello@yourcompany.com",
+  variables: { firstName: "Avery" },
+});
+
+if (result.status === "suppressed") {
+  console.warn("Send blocked:", result.blocked.reason, "—", result.blocked.fix);
+} else {
+  console.log("Queued as:", result.messageId);
+}
+```
+</CodeGroup>
+
+**Queued response**
+
+```json
+{
+  "activityId": "act_01hx9z3k2p4qr5st6uv7wx8yz",
+  "result": {
+    "messageId": "msg_01hx9z3k2p4qr5st6uv7wx8yz",
+    "status": "queued"
+  }
+}
+```
+
+**Suppressed response**
+
+```json
+{
+  "activityId": "act_01hx9z3k2p4qr5st6uv7wx8yz",
+  "result": {
+    "messageId": "msg_01hx9z3k2p4qr5st6uv7wx8yz",
+    "status": "suppressed",
+    "blocked": {
+      "reason": "no_consent",
+      "fix": "The contact has not granted email consent for the 'transactional' topic. Collect consent via a hosted preference page or the consent API before sending."
+    }
+  }
+}
+```
+
+<Note>
+  A `suppressed` status is not an error — it means a policy check intentionally blocked the send. Always inspect `blocked.reason` to decide how your application should respond. For example, a `no_consent` block might prompt you to show a preference centre; a `spending_cap_reached` block should alert your team to review billing.
+</Note>
+
+## Suppression reasons
+
+| `blocked.reason` | What it means | How to fix it |
+|---|---|---|
+| `no_consent` | The contact hasn't opted in to this topic on the email channel. | Collect consent via the preference page or consent API. |
+| `unsubscribed` | The contact actively unsubscribed from this topic. | Respect the opt-out; do not re-add without a fresh opt-in. |
+| `bounced` | A previous send to this address produced a hard bounce. | Remove or update the address; hard bounces cannot be retried. |
+| `spending_cap_reached` | Your account's email spending cap has been hit for this billing period. | Raise the cap in Billing settings or wait for the next period. |
+
+## Scheduled sends
+
+Pass `sendAfter` to defer delivery. The message is created immediately (and you receive a `messageId`), but Lath holds it until the specified time.
+
+```bash
+curl -X POST https://platform.trylath.com/v1/email/send \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "to": "user@example.com",
+    "template": "monthly-digest",
+    "topic": "newsletter",
+    "from": "digest@yourcompany.com",
+    "sendAfter": "2025-09-01T09:00:00Z"
+  }'
+```
+
+<Tip>
+  Add an `Idempotency-Key` header on every send request. If your server retries after a timeout, Lath will return the original response instead of delivering a duplicate message.
+</Tip>

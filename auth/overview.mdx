@@ -1,0 +1,114 @@
+---
+title: "Lath Auth: Sign-In, Sessions, and Organizations"
+sidebarTitle: "Overview"
+description: "Lath Auth handles sign-in codes, magic links, passwords, passkeys, and social OAuth — all recorded on the same contact as email and SMS."
+---
+
+Lath Auth gives you 67 operations covering every sign-in flow your product needs. Because auth runs on the same contact record as email and SMS, a verified email or phone number from sign-in is immediately available for messaging — no sync, no duplicate records, no reconciliation logic required. Every method returns a session token on success, and every session is visible and revokable per contact from both the API and the dashboard.
+
+## What's Included
+
+Lath Auth covers the full lifecycle of user identity:
+
+- **Email codes (OTP)** — send a 6-digit code to an email address and verify it in a second call
+- **Magic links** — send a click-to-sign-in link that resolves to a session token
+- **Passwords** — set, verify, and reset passwords with a built-in forgot-password flow
+- **Passkeys (WebAuthn)** — register and authenticate with browser-native biometrics or hardware keys
+- **Social OAuth** — connect Google, Microsoft, or GitHub as providers with your own client credentials
+- **Sessions** — every sign-in issues a token; list, inspect, revoke individually or in bulk
+- **Organizations** — model multi-tenant workspaces where contacts hold roles and sessions carry org context
+
+<CardGroup cols={2}>
+  <Card title="Sign-In Methods" icon="key" href="/auth/sign-in-methods">
+    Email codes, magic links, passwords, passkeys, and social OAuth — pick the flows that fit your product.
+  </Card>
+  <Card title="Sessions" icon="shield-check" href="/auth/sessions">
+    Inspect and revoke active sessions per contact. Every sign-in flow returns the same token shape.
+  </Card>
+  <Card title="Social OAuth" icon="arrow-right-arrow-left" href="/auth/sign-in-methods#social-oauth">
+    Connect Google, Microsoft, and GitHub using your own OAuth app credentials.
+  </Card>
+  <Card title="Organizations" icon="building" href="/auth/organizations">
+    Model multi-tenant workspaces with per-contact roles and org-scoped sessions.
+  </Card>
+</CardGroup>
+
+## How Sessions Work
+
+Every sign-in method — whether an OTP, a magic link, or a social OAuth callback — resolves to a session token. That token carries the contact's ID and, optionally, an organization context. You store it on the client, pass it as a Bearer token on your own API calls, or validate it server-side with `POST /v1/auth/session/get`. Sessions are revokable at any time, individually or in bulk, from the API or the dashboard.
+
+## Quick Example: Email Sign-In Code
+
+The fastest way to add passwordless sign-in is the two-step email code flow. Send a code, then verify it.
+
+**Step 1 — Send a sign-in code**
+
+<CodeGroup>
+```bash REST
+curl -X POST https://platform.trylath.com/v1/auth/code/send \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "ada@example.com" }'
+```
+
+```typescript TypeScript SDK
+import { Lath } from "@trylath/sdk";
+
+const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+const { activityId, result } = await lath.auth.code.send({
+  email: "ada@example.com",
+});
+```
+</CodeGroup>
+
+```json Response
+{
+  "activityId": "act_01j9...",
+  "result": {
+    "sent": true
+  }
+}
+```
+
+**Step 2 — Verify the code**
+
+<CodeGroup>
+```bash REST
+curl -X POST https://platform.trylath.com/v1/auth/code/verify \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "ada@example.com",
+    "code": "847201"
+  }'
+```
+
+```typescript TypeScript SDK
+const { activityId, result } = await lath.auth.code.verify({
+  email: "ada@example.com",
+  code: "847201",
+});
+
+const sessionToken = result.sessionToken;
+```
+</CodeGroup>
+
+```json Response
+{
+  "activityId": "act_01j9...",
+  "result": {
+    "sessionToken": "lath_sess_...",
+    "contactId": "con_01j9...",
+    "isNew": false
+  }
+}
+```
+
+<Note>
+  Codes are valid for 10 minutes. If the contact does not exist yet, Lath creates a new contact record automatically and links the verified email to it.
+</Note>
+
+## Unified Contact Record
+
+When a contact signs in for the first time — regardless of method — Lath creates a contact record and marks the email (or phone) as verified. That same record is used by Lath Email and Lath SMS, so any message you send after sign-in automatically reaches a verified address with the correct consent state. You never have to copy data between systems.

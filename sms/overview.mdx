@@ -1,0 +1,89 @@
+---
+title: "Lath SMS Overview: Consent, Templates, and Quiet Hours"
+sidebarTitle: "Overview"
+description: "Lath SMS covers transactional and marketing sends, templates, quiet hours enforcement, STOP/HELP/START keyword handling, and carrier registration."
+---
+
+Lath SMS provides everything you need for reaching contacts by text message. Every SMS passes through suppression, consent, quiet hours, and your spending cap before it is queued — the same guardrails that protect your email sends apply here too. Whether you're delivering a one-time passcode or a promotional campaign, Lath ensures the right message reaches the right person at the right time without violating carrier rules or contact preferences.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Send SMS" icon="paper-plane" href="/sms/send">
+    Deliver a single message to a contact using a body string or a published template. Schedule future sends with `sendAfter`.
+  </Card>
+  <Card title="Keywords" icon="reply" href="/sms/keywords">
+    STOP, HELP, and START are handled automatically. Lath updates consent records and sends compliant replies without any webhook logic on your end.
+  </Card>
+  <Card title="Templates" icon="file-lines" href="/sms/send#sms-templates">
+    Create reusable SMS templates with locale support. Inject variables at send time and publish a new version whenever the copy changes.
+  </Card>
+  <Card title="Registration" icon="building-columns" href="/sms/registration">
+    US carriers require 10DLC registration before high-volume delivery. Lath manages the process and stores sends while approval is pending.
+  </Card>
+</CardGroup>
+
+## Consent is per channel
+
+SMS consent is tracked independently from email consent. A contact can be opted in to the `promotions` topic on SMS while simultaneously being opted out on email — and vice versa. Every send you make must reference a `topic`; Lath checks that the contact holds active SMS consent for that topic before queuing the message.
+
+<Tip>
+  Transactional topics (such as `account-security` or `order-updates`) can be marked as transactional in your consent settings. Transactional topics bypass marketing suppression, including STOP opt-outs, so critical messages still reach recipients.
+</Tip>
+
+## Billing by segment
+
+SMS billing is per segment, not per message. A single-segment GSM-7 message supports up to 160 characters. If your body contains any character outside the GSM-7 alphabet (for example, emoji or accented characters not in the basic set), the encoding switches to UCS-2, which reduces the per-segment limit to 70 characters and increases cost. The send response always tells you how many segments were used and which encoding was applied.
+
+## Quiet hours
+
+Lath respects quiet hours at the contact level. If a recipient's phone number resolves to a timezone where the current time falls within your configured quiet window, the send is held in queue and delivered automatically when the window opens. No messages are dropped — delivery is deferred.
+
+## Quick example
+
+Send a verification code to a single recipient with a direct `POST` to `/v1/sms/send`:
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/sms/send \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "to": "+14155550100",
+    "topic": "account-security",
+    "body": "Your Lath verification code is 482910. It expires in 10 minutes."
+  }'
+```
+
+```typescript TypeScript SDK
+import { Lath } from "@trylath/sdk";
+
+const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+const { activityId, result } = await lath.sms.send({
+  to: "+14155550100",
+  topic: "account-security",
+  body: "Your Lath verification code is 482910. It expires in 10 minutes.",
+});
+
+console.log(result.messageId, result.status, result.segments);
+```
+</CodeGroup>
+
+A successful response looks like this:
+
+```json
+{
+  "activityId": "act_01hx9z...",
+  "result": {
+    "messageId": "msg_01hx9z...",
+    "status": "queued",
+    "segments": 1,
+    "encoding": "gsm-7"
+  }
+}
+```
+
+<Note>
+  The `status` field in the result is either `queued` (the message will be delivered) or `suppressed` (the send was blocked). When suppressed, a `blocked` object explains the reason and how to resolve it.
+</Note>

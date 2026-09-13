@@ -1,0 +1,325 @@
+---
+title: "Organization API Endpoints: Multi-Tenant Access Control"
+sidebarTitle: "Organizations"
+description: "REST endpoints for creating organizations, managing membership and roles, and scoping sessions to a specific organization context."
+---
+
+Organizations let you model multi-tenant access control on top of Lath Auth. Each organization has its own membership list and role assignments, so a single contact can belong to multiple organizations with different roles in each. Use organizations to power team workspaces, company accounts, or any structure where groups of contacts need shared access to a resource.
+
+---
+
+## Create an organization
+
+`POST /v1/auth/org/create`
+
+Creates a new organization. The creating API key is not automatically added as a member — add members explicitly with `/v1/auth/org/member/add`.
+
+### Request
+
+<ParamField body="name" type="string" required>
+  A human-readable name for the organization, such as a company or team name.
+</ParamField>
+
+### Response
+
+<ResponseField name="org" type="object">
+  <Expandable title="org fields">
+    <ResponseField name="id" type="string">
+      The unique organization ID. Store this — you'll need it for all subsequent org operations.
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      The organization's display name.
+    </ResponseField>
+    <ResponseField name="createdAt" type="string">
+      ISO 8601 timestamp of when the organization was created.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/auth/org/create \
+  -H "Authorization: Bearer lath_live_sk..." \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Acme Corp" }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.auth.org.create({ name: "Acme Corp" });
+console.log("Created org:", result.org.id);
+```
+
+</CodeGroup>
+
+---
+
+## Get an organization
+
+`POST /v1/auth/org/get`
+
+Retrieves the full details of an organization by ID.
+
+### Request
+
+<ParamField body="orgId" type="string" required>
+  The ID of the organization to retrieve.
+</ParamField>
+
+### Response
+
+<ResponseField name="org" type="object">
+  <Expandable title="org fields">
+    <ResponseField name="id" type="string">
+      The organization ID.
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      The organization's display name.
+    </ResponseField>
+    <ResponseField name="createdAt" type="string">
+      ISO 8601 timestamp of creation.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/auth/org/get \
+  -H "Authorization: Bearer lath_live_sk..." \
+  -H "Content-Type: application/json" \
+  -d '{ "orgId": "org_abc123" }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.auth.org.get({ orgId: "org_abc123" });
+console.log(result.org.name);
+```
+
+</CodeGroup>
+
+---
+
+## Membership
+
+### Add a member
+
+`POST /v1/auth/org/member/add`
+
+Adds a contact to an organization with the specified role. If the contact is already a member, this call returns an error — use `/v1/auth/org/member/update` to change their role instead.
+
+#### Request
+
+<ParamField body="orgId" type="string" required>
+  The ID of the organization to add the member to.
+</ParamField>
+
+<ParamField body="contactId" type="string" required>
+  The Lath contact ID of the user to add.
+</ParamField>
+
+<ParamField body="role" type="string" required>
+  The role to assign. Role names are freeform strings — define your own conventions (e.g. `owner`, `admin`, `member`, `viewer`) and enforce them in your application logic.
+</ParamField>
+
+#### Response
+
+<ResponseField name="member" type="object">
+  <Expandable title="member fields">
+    <ResponseField name="contactId" type="string">
+      The added contact's ID.
+    </ResponseField>
+    <ResponseField name="role" type="string">
+      The role assigned to this member.
+    </ResponseField>
+    <ResponseField name="joinedAt" type="string">
+      ISO 8601 timestamp of when the contact joined the organization.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/auth/org/member/add \
+  -H "Authorization: Bearer lath_live_sk..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "orgId": "org_abc123",
+    "contactId": "cnt_xyz789",
+    "role": "admin"
+  }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.auth.org.member.add({
+  orgId: "org_abc123",
+  contactId: "cnt_xyz789",
+  role: "admin",
+});
+console.log("Added member with role:", result.member.role);
+```
+
+</CodeGroup>
+
+---
+
+### List members
+
+`POST /v1/auth/org/member/list`
+
+Returns all members of an organization, including their roles and join dates. Use this to power a team roster or access control check.
+
+#### Request
+
+<ParamField body="orgId" type="string" required>
+  The ID of the organization whose members you want to list.
+</ParamField>
+
+#### Response
+
+<ResponseField name="members" type="array">
+  An array of member objects, ordered by `joinedAt` ascending.
+
+  <Expandable title="member fields">
+    <ResponseField name="contactId" type="string">
+      The member's Lath contact ID.
+    </ResponseField>
+    <ResponseField name="role" type="string">
+      The member's current role.
+    </ResponseField>
+    <ResponseField name="joinedAt" type="string">
+      ISO 8601 timestamp of when they joined the organization.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/auth/org/member/list \
+  -H "Authorization: Bearer lath_live_sk..." \
+  -H "Content-Type: application/json" \
+  -d '{ "orgId": "org_abc123" }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.auth.org.member.list({ orgId: "org_abc123" });
+
+result.members.forEach((m) => {
+  console.log(`${m.contactId}: ${m.role}`);
+});
+```
+
+</CodeGroup>
+
+---
+
+### Remove a member
+
+`POST /v1/auth/org/member/remove`
+
+Removes a contact from an organization. Their Lath contact record is not deleted — only the membership association is removed.
+
+#### Request
+
+<ParamField body="orgId" type="string" required>
+  The ID of the organization to remove the member from.
+</ParamField>
+
+<ParamField body="contactId" type="string" required>
+  The Lath contact ID of the member to remove.
+</ParamField>
+
+#### Response
+
+<ResponseField name="removed" type="boolean">
+  Always `true` on a successful removal.
+</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/auth/org/member/remove \
+  -H "Authorization: Bearer lath_live_sk..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "orgId": "org_abc123",
+    "contactId": "cnt_xyz789"
+  }'
+```
+
+```typescript TypeScript SDK
+await lath.auth.org.member.remove({
+  orgId: "org_abc123",
+  contactId: "cnt_xyz789",
+});
+```
+
+</CodeGroup>
+
+---
+
+### Update a member's role
+
+`POST /v1/auth/org/member/update`
+
+Changes the role of an existing organization member. Use this instead of a remove-and-re-add sequence to avoid gaps in membership.
+
+#### Request
+
+<ParamField body="orgId" type="string" required>
+  The ID of the organization.
+</ParamField>
+
+<ParamField body="contactId" type="string" required>
+  The Lath contact ID of the member whose role you want to update.
+</ParamField>
+
+<ParamField body="role" type="string" required>
+  The new role to assign.
+</ParamField>
+
+#### Response
+
+<ResponseField name="member" type="object">
+  <Expandable title="member fields">
+    <ResponseField name="contactId" type="string">
+      The member's contact ID.
+    </ResponseField>
+    <ResponseField name="role" type="string">
+      The updated role.
+    </ResponseField>
+    <ResponseField name="joinedAt" type="string">
+      ISO 8601 timestamp of original membership (unchanged).
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/auth/org/member/update \
+  -H "Authorization: Bearer lath_live_sk..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "orgId": "org_abc123",
+    "contactId": "cnt_xyz789",
+    "role": "owner"
+  }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.auth.org.member.update({
+  orgId: "org_abc123",
+  contactId: "cnt_xyz789",
+  role: "owner",
+});
+console.log("Updated role to:", result.member.role);
+```
+
+</CodeGroup>
+
+<Tip>
+  Role strings are freeform — Lath stores them but does not enforce any hierarchy. Define and document your own role semantics (e.g. `owner > admin > member`) and check them in your application's authorization layer.
+</Tip>

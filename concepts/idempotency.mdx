@@ -1,0 +1,112 @@
+---
+title: "Idempotency Keys: Safe Retries on Every Lath Request"
+sidebarTitle: "Idempotency"
+description: "Add an Idempotency-Key to any mutating request. On retry, the same key replays the stored response — no duplicate sends or double-charges."
+---
+
+Networks fail. Servers time out. Background jobs retry. Without a way to deduplicate requests, any of these situations can result in a user receiving the same transactional email twice, a contact being created twice, or a charge being recorded twice. Lath's idempotency system prevents all of that by caching the result of every successful mutating request and replaying it on repeat attempts — with no side effects.
+
+## How it works
+
+Pass an `Idempotency-Key` header on any mutating request (creates, sends, updates, revokes). The first time Lath sees the key, it processes the request normally and stores the response. On any subsequent request with the same key:
+
+- If the **body matches**, Lath returns the stored response immediately — no new contact is created, no new message is sent, no charge is incurred.
+- If the **body differs**, Lath returns a `409 idempotency_mismatch` error rather than risking an unintended side effect.
+
+Read operations — `contact.get`, `email.list`, and similar — are naturally safe to retry and don't need idempotency keys.
+
+---
+
+## Sending a request with an idempotency key
+
+Add the `Idempotency-Key` header to any mutating request:
+
+<CodeGroup>
+
+```bash REST (curl)
+curl -X POST https://platform.trylath.com/v1/email/send \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: order-confirm-user-123-2024-01-15" \
+  -d '{
+    "to": "ada@example.com",
+    "topic": "order-updates",
+    "template": "tmpl_01hx...",
+    "data": {
+      "orderId": "ord_456",
+      "total": "$49.00"
+    }
+  }'
+```
+
+```typescript TypeScript SDK
+import Lath from "@trylath/sdk";
+
+const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+await lath.email.send(
+  {
+    to: "ada@example.com",
+    topic: "order-updates",
+    template: "tmpl_01hx...",
+    data: {
+      orderId: "ord_456",
+      total: "$49.00",
+    },
+  },
+  {
+    idempotencyKey: "order-confirm-user-123-2024-01-15",
+  }
+);
+```
+
+</CodeGroup>
+
+---
+
+## Key format and naming conventions
+
+An idempotency key can be any string up to **255 characters**. Use a format that is unique to the specific operation and will be reproduced exactly on retry:
+
+| Pattern | Example | Best for |
+|---------|---------|----------|
+| `<event>-<userId>-<date>` | `order-confirm-user-123-2024-01-15` | Webhook handlers triggered by dated events |
+| UUID v4 | `550e8400-e29b-41d4-a716-446655440000` | One-off API calls where you control key generation |
+| `<entityType>-<entityId>-<action>` | `invoice-inv_789-sent` | Background jobs processing specific records |
+
+<Tip>
+  For the highest reliability, derive your key from an ID that already exists in your system — such as an order ID, invoice ID, or webhook event ID. That way, if your process crashes and restarts, it will reproduce the exact same key without any additional state management.
+</Tip>
+
+<Note>
+  For email sends triggered by webhooks or background jobs, always use an idempotency key derived from the triggering event ID to prevent double-sends on retry. For example, if your payment provider sends a `payment.succeeded` webhook with ID `evt_abc123`, use `payment-succeeded-evt_abc123` as your idempotency key on the receipt email send.
+</Note>
+
+---
+
+## Error reference
+
+| HTTP status | Error code | Meaning |
+|-------------|------------|---------|
+| `409` | `idempotency_mismatch` | The key was already used with a different request body. Create a new key for the new request, or resend the original body to replay the stored response. |
+
+An `idempotency_mismatch` error looks like this:
+
+```json
+{
+  "error": {
+    "code": "idempotency_mismatch",
+    "message": "An idempotency key was reused with a different request body. Use a new key for a different request."
+  }
+}
+```
+
+<Warning>
+  Do not change the request body and reuse the same idempotency key — even to fix a typo. Generate a new key for the corrected request. Reusing a key with a changed body signals an inconsistency in your retry logic, which is why Lath rejects it rather than guessing your intent.
+</Warning>
+
+---
+
+## Storage and expiry
+
+Lath retains idempotency records for **24 hours** from the time of the original successful request. After that window, reusing a key is treated as a fresh request. If your retry window is longer than 24 hours, generate a new key for each attempt rather than reusing a time-bounded one.

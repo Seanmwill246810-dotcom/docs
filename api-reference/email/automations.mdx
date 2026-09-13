@@ -1,0 +1,379 @@
+---
+title: "Email Automation Endpoints: Create, Trigger, and Update"
+sidebarTitle: "Automations"
+description: "REST endpoints to define multi-step email automations triggered per contact. Supports send, wait, branch, and property-set steps. Runs are fully isolated."
+---
+
+Automations let you define a reusable sequence of actions — emails, delays, branching logic, and property updates — and then trigger that sequence for individual contacts. Each trigger creates an independent run, so the same automation can be in flight for thousands of contacts simultaneously. Runs are isolated: pausing or cancelling one run does not affect others.
+
+## Step type reference
+
+Before creating an automation, understand the four step types you can compose.
+
+<Accordion title="wait — pause the run for a duration">
+
+```json
+{
+  "type": "wait",
+  "seconds": 86400
+}
+```
+
+Pauses the run for the specified number of seconds before proceeding to the next step. Use this to space out messages. The `seconds` value must be between `1` and `7,776,000` (90 days).
+
+</Accordion>
+
+<Accordion title="send — deliver a message">
+
+```json
+{
+  "type": "send",
+  "channel": "email",
+  "template": "onboarding-day-3",
+  "topic": "onboarding",
+  "from": "hello@acme.com"
+}
+```
+
+Sends a message using a published template. Consent and suppression checks run at execution time, not at trigger time.
+
+</Accordion>
+
+<Accordion title="property.set — update a contact property">
+
+```json
+{
+  "type": "property.set",
+  "key": "onboarded",
+  "value": true
+}
+```
+
+Sets an arbitrary property on the contact record. Values may be strings, numbers, or booleans.
+
+</Accordion>
+
+<Accordion title="branch — conditional logic">
+
+```json
+{
+  "type": "branch",
+  "if": {
+    "field": "properties.plan",
+    "op": "eq",
+    "value": "pro"
+  },
+  "then": [
+    { "type": "send", "channel": "email", "template": "pro-welcome", "topic": "onboarding", "from": "hello@acme.com" }
+  ],
+  "else": [
+    { "type": "send", "channel": "email", "template": "free-welcome", "topic": "onboarding", "from": "hello@acme.com" }
+  ]
+}
+```
+
+Evaluates a condition against the contact's record at runtime and follows the `then` or `else` branch. Supported `op` values: `eq`, `neq`, `gt`, `lt`, `contains`, `exists`, `not_exists`.
+
+</Accordion>
+
+---
+
+## POST /v1/email/automation/create
+
+Define a new automation by providing a name and an ordered array of steps.
+
+### Request
+
+<ParamField body="name" type="string" required>
+  Unique name for the automation within your project (e.g. `"onboarding-sequence"`).
+</ParamField>
+
+<ParamField body="steps" type="array" required>
+  Ordered array of step objects. Each step must have a `type` field; see the step type reference above for the full schema of each type.
+</ParamField>
+
+### Response
+
+<ResponseField name="automation.id" type="string">
+  UUID assigned to this automation.
+</ResponseField>
+
+<ResponseField name="automation.name" type="string">
+  The automation name as stored.
+</ResponseField>
+
+<ResponseField name="automation.stepCount" type="integer">
+  Total number of steps in the automation.
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/email/automation/create \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "onboarding-sequence",
+    "steps": [
+      {
+        "type": "send",
+        "channel": "email",
+        "template": "welcome",
+        "topic": "onboarding",
+        "from": "hello@acme.com"
+      },
+      { "type": "wait", "seconds": 86400 },
+      {
+        "type": "branch",
+        "if": { "field": "properties.plan", "op": "eq", "value": "pro" },
+        "then": [
+          { "type": "send", "channel": "email", "template": "pro-tips", "topic": "onboarding", "from": "hello@acme.com" }
+        ],
+        "else": [
+          { "type": "send", "channel": "email", "template": "upgrade-nudge", "topic": "onboarding", "from": "hello@acme.com" }
+        ]
+      },
+      { "type": "property.set", "key": "onboarded", "value": true }
+    ]
+  }'
+```
+
+```typescript TypeScript SDK
+import { LathClient } from "@trylath/sdk";
+
+const lath = new LathClient({ apiKey: process.env.LATH_SECRET_KEY });
+
+const { result } = await lath.email.automations.create({
+  name: "onboarding-sequence",
+  steps: [
+    { type: "send", channel: "email", template: "welcome", topic: "onboarding", from: "hello@acme.com" },
+    { type: "wait", seconds: 86400 },
+    {
+      type: "branch",
+      if: { field: "properties.plan", op: "eq", value: "pro" },
+      then: [
+        { type: "send", channel: "email", template: "pro-tips", topic: "onboarding", from: "hello@acme.com" },
+      ],
+      else: [
+        { type: "send", channel: "email", template: "upgrade-nudge", topic: "onboarding", from: "hello@acme.com" },
+      ],
+    },
+    { type: "property.set", key: "onboarded", value: true },
+  ],
+});
+
+console.log("Created automation:", result.automation.id);
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/email/automation/trigger
+
+Start an automation run for a specific contact. Each call creates an independent run instance.
+
+### Request
+
+<ParamField body="automationId" type="string" required>
+  The UUID of the automation to run.
+</ParamField>
+
+<ParamField body="contactId" type="string" required>
+  The contact to run the automation for.
+</ParamField>
+
+<ParamField body="context" type="object">
+  Optional key-value pairs available to steps at runtime (e.g. for variable substitution in `send` steps). Values must be strings, numbers, or booleans.
+</ParamField>
+
+### Response
+
+<ResponseField name="runId" type="string">
+  UUID of the new automation run. Use this to cancel the run later.
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Always `"started"` on a successful trigger.
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/email/automation/trigger \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "automationId": "auto_01hx9z3k2q7p4m8w",
+    "contactId": "con_01hx9z3k2q7p4m8w",
+    "context": { "signupSource": "google" }
+  }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.email.automations.trigger({
+  automationId: "auto_01hx9z3k2q7p4m8w",
+  contactId: "con_01hx9z3k2q7p4m8w",
+  context: { signupSource: "google" },
+});
+
+console.log("Run started:", result.runId);
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/email/automation/update
+
+Replace the steps of an existing automation. In-flight runs continue to execute against the previous step definition — only new triggers use the updated steps.
+
+### Request
+
+<ParamField body="automationId" type="string" required>
+  UUID of the automation to update.
+</ParamField>
+
+<ParamField body="steps" type="array" required>
+  New ordered array of step objects. Replaces the entire step list.
+</ParamField>
+
+### Response
+
+Returns the full updated automation object with `id`, `name`, `stepCount`, and `updatedAt`.
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/email/automation/update \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "automationId": "auto_01hx9z3k2q7p4m8w",
+    "steps": [
+      { "type": "send", "channel": "email", "template": "welcome-v2", "topic": "onboarding", "from": "hello@acme.com" },
+      { "type": "wait", "seconds": 172800 },
+      { "type": "property.set", "key": "onboarded", "value": true }
+    ]
+  }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.email.automations.update({
+  automationId: "auto_01hx9z3k2q7p4m8w",
+  steps: [
+    { type: "send", channel: "email", template: "welcome-v2", topic: "onboarding", from: "hello@acme.com" },
+    { type: "wait", seconds: 172800 },
+    { type: "property.set", key: "onboarded", value: true },
+  ],
+});
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/email/automation/get
+
+Retrieve the full definition of an automation, including all steps.
+
+### Request
+
+<ParamField body="automationId" type="string" required>
+  UUID of the automation to retrieve.
+</ParamField>
+
+### Response
+
+Returns the automation object with `id`, `name`, `steps` (full array), `stepCount`, `createdAt`, and `updatedAt`.
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/email/automation/get \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{ "automationId": "auto_01hx9z3k2q7p4m8w" }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.email.automations.get({
+  automationId: "auto_01hx9z3k2q7p4m8w",
+});
+
+console.log("Steps:", result.automation.steps);
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/email/automation/list
+
+List all automations in your project.
+
+### Request
+
+This endpoint takes no request body.
+
+### Response
+
+Returns `{ automations: [{ id, name, stepCount, createdAt, updatedAt }] }`.
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/email/automation/list \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.email.automations.list();
+
+for (const auto of result.automations) {
+  console.log(`${auto.name} — ${auto.stepCount} steps`);
+}
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/email/automation/cancel
+
+Cancel a currently running automation instance. Steps that have already executed (sent emails, set properties) are not rolled back.
+
+### Request
+
+<ParamField body="runId" type="string" required>
+  UUID of the run to cancel, as returned by `/v1/email/automation/trigger`.
+</ParamField>
+
+### Response
+
+Returns `{ runId, status: "cancelled", cancelledAt }`.
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/email/automation/cancel \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{ "runId": "run_01hx9z3k2q7p4m8w" }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.email.automations.cancel({
+  runId: "run_01hx9z3k2q7p4m8w",
+});
+
+console.log("Cancelled at:", result.cancelledAt);
+```
+
+</CodeGroup>
+
+<Note>
+  Cancelling a run that is currently paused in a `wait` step takes effect immediately. Any `send` steps scheduled within that wait window will not execute.
+</Note>

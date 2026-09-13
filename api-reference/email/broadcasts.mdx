@@ -1,0 +1,307 @@
+---
+title: "Email Broadcast Endpoints: Create, Send, and Monitor"
+sidebarTitle: "Broadcasts"
+description: "REST endpoints to create one-time email broadcasts targeting a segment, schedule or immediately dispatch them, and monitor per-recipient delivery progress."
+---
+
+A broadcast is a one-time email send to every contact in a segment who has granted consent for the specified topic. You first create a broadcast in `draft` status, which gives you a chance to review the estimated recipient count before committing. When you are ready, call `/send` to dispatch or schedule it. Lath fans the message out individually so each recipient receives a personalised render of the template.
+
+## POST /v1/email/broadcast/create
+
+Create a new broadcast in `draft` status. No email is sent at this point.
+
+### Request
+
+<ParamField body="name" type="string" required>
+  A human-readable name for this broadcast (e.g. `"September newsletter"`). Visible in the dashboard and webhook events.
+</ParamField>
+
+<ParamField body="segment" type="string" required>
+  The ID of the segment that defines your recipient list. Only contacts in the segment who have active consent for the given `topic` on the `email` channel will receive the message.
+</ParamField>
+
+<ParamField body="template" type="string" required>
+  Name of a published email template to use.
+</ParamField>
+
+<ParamField body="topic" type="string" required>
+  Consent topic that each recipient must have granted (e.g. `"marketing"`).
+</ParamField>
+
+<ParamField body="from" type="string" required>
+  Verified sender address (e.g. `"news@acme.com"`).
+</ParamField>
+
+<ParamField body="subject" type="string">
+  Overrides the template subject line. Maximum 300 characters.
+</ParamField>
+
+<ParamField body="variables" type="object">
+  Static variables injected into the template for every recipient. For per-contact dynamic values, use contact properties in your template with `{{ contact.properties.key }}` syntax.
+</ParamField>
+
+### Response
+
+<ResponseField name="broadcast.id" type="string">
+  UUID assigned to this broadcast.
+</ResponseField>
+
+<ResponseField name="broadcast.name" type="string">
+  The broadcast name as stored.
+</ResponseField>
+
+<ResponseField name="broadcast.status" type="string">
+  Always `"draft"` after creation.
+</ResponseField>
+
+<ResponseField name="broadcast.estimatedRecipients" type="integer">
+  Number of contacts in the segment who currently have consent. This is an estimate computed at creation time; the actual number may differ slightly when the broadcast executes.
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/email/broadcast/create \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "September newsletter",
+    "segment": "seg_01hx9z3k2q7p4m8w",
+    "template": "monthly-newsletter",
+    "topic": "marketing",
+    "from": "news@acme.com",
+    "subject": "What'\''s new at Acme — September"
+  }'
+```
+
+```typescript TypeScript SDK
+import { LathClient } from "@trylath/sdk";
+
+const lath = new LathClient({ apiKey: process.env.LATH_SECRET_KEY });
+
+const { result } = await lath.email.broadcasts.create({
+  name: "September newsletter",
+  segment: "seg_01hx9z3k2q7p4m8w",
+  template: "monthly-newsletter",
+  topic: "marketing",
+  from: "news@acme.com",
+  subject: "What's new at Acme — September",
+});
+
+console.log("Created broadcast:", result.broadcast.id);
+console.log("Estimated recipients:", result.broadcast.estimatedRecipients);
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/email/broadcast/send
+
+Dispatch a draft broadcast immediately or at a scheduled time. Once you call this endpoint, the broadcast transitions out of `draft` and cannot be edited.
+
+### Request
+
+<ParamField body="broadcastId" type="string" required>
+  UUID of the broadcast to send. Must be in `draft` status.
+</ParamField>
+
+<ParamField body="sendAt" type="string">
+  ISO 8601 datetime to schedule the broadcast (e.g. `"2025-09-01T09:00:00Z"`). Omit to send immediately.
+</ParamField>
+
+### Response
+
+<ResponseField name="broadcast.id" type="string">
+  UUID of the broadcast.
+</ResponseField>
+
+<ResponseField name="broadcast.status" type="string">
+  `"scheduled"` if `sendAt` was provided; `"sending"` if dispatched immediately.
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+# Send immediately
+curl -X POST https://platform.trylath.com/v1/email/broadcast/send \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{ "broadcastId": "bcast_01hx9z3k2q7p4m8w" }'
+
+# Schedule for later
+curl -X POST https://platform.trylath.com/v1/email/broadcast/send \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "broadcastId": "bcast_01hx9z3k2q7p4m8w",
+    "sendAt": "2025-09-01T09:00:00Z"
+  }'
+```
+
+```typescript TypeScript SDK
+// Send immediately
+const { result } = await lath.email.broadcasts.send({
+  broadcastId: "bcast_01hx9z3k2q7p4m8w",
+});
+
+// Schedule for later
+const { result: scheduled } = await lath.email.broadcasts.send({
+  broadcastId: "bcast_01hx9z3k2q7p4m8w",
+  sendAt: "2025-09-01T09:00:00Z",
+});
+
+console.log("Status:", scheduled.broadcast.status); // "scheduled"
+```
+
+</CodeGroup>
+
+<Warning>
+  You cannot edit a broadcast after calling `/send`. If you need to make changes, cancel the scheduled broadcast and create a new one.
+</Warning>
+
+---
+
+## POST /v1/email/broadcast/get
+
+Retrieve a broadcast including real-time delivery statistics.
+
+### Request
+
+<ParamField body="broadcastId" type="string" required>
+  UUID of the broadcast to retrieve.
+</ParamField>
+
+### Response
+
+Returns the full broadcast object with `id`, `name`, `status`, `template`, `segment`, `topic`, `from`, `subject`, `variables`, `estimatedRecipients`, `sendAt`, `createdAt`, and a `stats` object containing:
+
+<ResponseField name="stats.sent" type="integer">
+  Number of messages successfully handed to the sending provider.
+</ResponseField>
+
+<ResponseField name="stats.delivered" type="integer">
+  Number of messages confirmed delivered by the receiving server.
+</ResponseField>
+
+<ResponseField name="stats.opened" type="integer">
+  Number of unique opens recorded.
+</ResponseField>
+
+<ResponseField name="stats.clicked" type="integer">
+  Number of unique link clicks recorded.
+</ResponseField>
+
+<ResponseField name="stats.bounced" type="integer">
+  Number of hard or soft bounces.
+</ResponseField>
+
+<ResponseField name="stats.suppressed" type="integer">
+  Number of recipients skipped due to no consent, suppression, or spending cap.
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/email/broadcast/get \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{ "broadcastId": "bcast_01hx9z3k2q7p4m8w" }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.email.broadcasts.get({
+  broadcastId: "bcast_01hx9z3k2q7p4m8w",
+});
+
+const { stats } = result.broadcast;
+console.log(`Sent: ${stats.sent}, Opened: ${stats.opened}, Bounced: ${stats.bounced}`);
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/email/broadcast/cancel
+
+Cancel a broadcast that is in `scheduled` status. Messages that have already been sent are not recalled.
+
+### Request
+
+<ParamField body="broadcastId" type="string" required>
+  UUID of the broadcast to cancel. Must be in `scheduled` status.
+</ParamField>
+
+### Response
+
+Returns `{ broadcast: { id, status: "cancelled", cancelledAt } }`.
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/email/broadcast/cancel \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{ "broadcastId": "bcast_01hx9z3k2q7p4m8w" }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.email.broadcasts.cancel({
+  broadcastId: "bcast_01hx9z3k2q7p4m8w",
+});
+
+console.log("Cancelled at:", result.broadcast.cancelledAt);
+```
+
+</CodeGroup>
+
+<Note>
+  Only `scheduled` broadcasts can be cancelled. Broadcasts in `sending` or `sent` status cannot be cancelled.
+</Note>
+
+---
+
+## POST /v1/email/broadcast/list
+
+List all broadcasts in your project with their current status.
+
+### Request
+
+This endpoint takes no request body.
+
+### Response
+
+Returns `{ broadcasts: [{ id, name, status, estimatedRecipients, sendAt, createdAt, stats }] }`.
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/email/broadcast/list \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.email.broadcasts.list();
+
+for (const broadcast of result.broadcasts) {
+  console.log(`${broadcast.name} — ${broadcast.status}`);
+}
+```
+
+</CodeGroup>
+
+## Broadcast lifecycle
+
+<Steps>
+  <Step title="Create">
+    Call `/v1/email/broadcast/create`. The broadcast is in `draft` status. Review `estimatedRecipients`.
+  </Step>
+  <Step title="Send or schedule">
+    Call `/v1/email/broadcast/send`. Pass `sendAt` to schedule, or omit to dispatch immediately. Status becomes `scheduled` or `sending`.
+  </Step>
+  <Step title="Monitor">
+    Poll `/v1/email/broadcast/get` or listen for `broadcast.completed` webhook events to track delivery stats.
+  </Step>
+</Steps>

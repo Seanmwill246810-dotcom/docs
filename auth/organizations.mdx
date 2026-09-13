@@ -1,0 +1,385 @@
+---
+title: "Organizations: Multi-Tenant Access Control with Lath"
+sidebarTitle: "Organizations"
+description: "Lath organizations let you model multi-tenant workspaces. Contacts join organizations with roles, and sessions can be scoped to an organization."
+---
+
+Organizations are Lath's model for the multi-tenant layer of your product — a workspace, a team, a company, or any other grouping that should share access to resources. A single contact can be a member of multiple organizations simultaneously, each with a distinct role. When a contact signs in, their session can carry an `orgId` so that your API always knows which organizational context is active, without requiring extra lookups.
+
+You create and manage organizations entirely through the API. There is no separate admin portal required — the same API key that handles sign-in also manages org membership.
+
+## How Organizations Work
+
+Every organization has a unique `orgId`. Contacts join an organization as members and are assigned a role that your application defines and enforces. Lath stores the membership and surfaces it through session data; you decide what each role is allowed to do in your own authorization logic.
+
+<Tip>
+  Use organization roles to gate features in your app. Check the session's org membership server-side before performing sensitive operations — never rely on client-side role checks alone.
+</Tip>
+
+## Organization Endpoints
+
+| Operation | Endpoint |
+|-----------|----------|
+| Create an organization | `POST /v1/auth/org/create` |
+| Get an organization | `POST /v1/auth/org/get` |
+| Add a member | `POST /v1/auth/org/member/add` |
+| List members | `POST /v1/auth/org/member/list` |
+| Update a member's role | `POST /v1/auth/org/member/update` |
+| Remove a member | `POST /v1/auth/org/member/remove` |
+
+## Create an Organization
+
+Call `POST /v1/auth/org/create` with a human-readable name. Lath returns an `orgId` you use in all subsequent membership calls.
+
+<ParamField body="name" type="string" required>
+  A display name for the organization (for example, "Acme Corp" or "Team Rocket").
+</ParamField>
+
+<CodeGroup>
+```bash REST
+curl -X POST https://platform.trylath.com/v1/auth/org/create \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Acme Corp" }'
+```
+
+```typescript TypeScript SDK
+import { Lath } from "@trylath/sdk";
+
+const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+const { result } = await lath.auth.org.create({ name: "Acme Corp" });
+const orgId = result.orgId;
+```
+</CodeGroup>
+
+```json Response
+{
+  "activityId": "act_01j9...",
+  "result": {
+    "orgId": "org_01j9...",
+    "name": "Acme Corp",
+    "createdAt": "2024-11-04T10:00:00Z"
+  }
+}
+```
+
+## Get an Organization
+
+Use `POST /v1/auth/org/get` to retrieve an organization's details by its ID. Use this to display the organization name and metadata in your app's settings pages.
+
+<ParamField body="orgId" type="string" required>
+  The ID of the organization to retrieve.
+</ParamField>
+
+<CodeGroup>
+```bash REST
+curl -X POST https://platform.trylath.com/v1/auth/org/get \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "orgId": "org_01j9..." }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.auth.org.get({ orgId: "org_01j9..." });
+console.log(result.name, result.createdAt);
+```
+</CodeGroup>
+
+```json Response
+{
+  "activityId": "act_01j9...",
+  "result": {
+    "orgId": "org_01j9...",
+    "name": "Acme Corp",
+    "createdAt": "2024-11-04T10:00:00Z"
+  }
+}
+```
+
+## Add a Member
+
+Use `POST /v1/auth/org/member/add` to add a contact to an organization. Supply the `orgId`, the contact's `contactId`, and the `role` you want to assign. Role values are strings your application defines — common examples are `owner`, `admin`, and `member`.
+
+<ParamField body="orgId" type="string" required>
+  The ID of the organization.
+</ParamField>
+<ParamField body="contactId" type="string" required>
+  The contact to add as a member.
+</ParamField>
+<ParamField body="role" type="string" required>
+  A role string defined by your application (e.g., `"owner"`, `"admin"`, `"member"`).
+</ParamField>
+
+<CodeGroup>
+```bash REST
+curl -X POST https://platform.trylath.com/v1/auth/org/member/add \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "orgId": "org_01j9...",
+    "contactId": "con_01j9...",
+    "role": "admin"
+  }'
+```
+
+```typescript TypeScript SDK
+await lath.auth.org.member.add({
+  orgId: "org_01j9...",
+  contactId: "con_01j9...",
+  role: "admin",
+});
+```
+</CodeGroup>
+
+```json Response
+{
+  "activityId": "act_01j9...",
+  "result": {
+    "orgId": "org_01j9...",
+    "contactId": "con_01j9...",
+    "role": "admin",
+    "addedAt": "2024-11-04T10:05:00Z"
+  }
+}
+```
+
+## List Members
+
+Use `POST /v1/auth/org/member/list` to retrieve all current members of an organization along with their roles. Use this to power a team management view in your app.
+
+<ParamField body="orgId" type="string" required>
+  The organization whose members you want to list.
+</ParamField>
+
+<CodeGroup>
+```bash REST
+curl -X POST https://platform.trylath.com/v1/auth/org/member/list \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "orgId": "org_01j9..." }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.auth.org.member.list({ orgId: "org_01j9..." });
+
+for (const member of result.members) {
+  console.log(member.contactId, member.role);
+}
+```
+</CodeGroup>
+
+```json Response
+{
+  "activityId": "act_01j9...",
+  "result": {
+    "members": [
+      {
+        "contactId": "con_01j9...",
+        "email": "ada@example.com",
+        "role": "owner",
+        "addedAt": "2024-11-04T10:00:00Z"
+      },
+      {
+        "contactId": "con_02k8...",
+        "email": "grace@example.com",
+        "role": "admin",
+        "addedAt": "2024-11-04T10:05:00Z"
+      }
+    ]
+  }
+}
+```
+
+## Update a Member's Role
+
+Use `POST /v1/auth/org/member/update` to change the role of an existing organization member. Call this when you promote a member to admin or demote an admin back to a standard member role.
+
+<ParamField body="orgId" type="string" required>
+  The organization the member belongs to.
+</ParamField>
+<ParamField body="contactId" type="string" required>
+  The contact whose role you want to update.
+</ParamField>
+<ParamField body="role" type="string" required>
+  The new role to assign (e.g., `"owner"`, `"admin"`, `"member"`).
+</ParamField>
+
+<CodeGroup>
+```bash REST
+curl -X POST https://platform.trylath.com/v1/auth/org/member/update \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "orgId": "org_01j9...",
+    "contactId": "con_02k8...",
+    "role": "admin"
+  }'
+```
+
+```typescript TypeScript SDK
+await lath.auth.org.member.update({
+  orgId: "org_01j9...",
+  contactId: "con_02k8...",
+  role: "admin",
+});
+```
+</CodeGroup>
+
+```json Response
+{
+  "activityId": "act_01j9...",
+  "result": {
+    "orgId": "org_01j9...",
+    "contactId": "con_02k8...",
+    "role": "admin",
+    "updatedAt": "2024-11-04T11:30:00Z"
+  }
+}
+```
+
+## Remove a Member
+
+Use `POST /v1/auth/org/member/remove` to revoke a contact's membership from an organization. This does not delete the contact or affect their sessions — it only removes their association with the organization.
+
+<ParamField body="orgId" type="string" required>
+  The organization to remove the member from.
+</ParamField>
+<ParamField body="contactId" type="string" required>
+  The contact to remove.
+</ParamField>
+
+<CodeGroup>
+```bash REST
+curl -X POST https://platform.trylath.com/v1/auth/org/member/remove \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "orgId": "org_01j9...",
+    "contactId": "con_02k8..."
+  }'
+```
+
+```typescript TypeScript SDK
+await lath.auth.org.member.remove({
+  orgId: "org_01j9...",
+  contactId: "con_02k8...",
+});
+```
+</CodeGroup>
+
+```json Response
+{
+  "activityId": "act_01j9...",
+  "result": {
+    "removed": true
+  }
+}
+```
+
+## Session Scoping
+
+When a contact is a member of multiple organizations, their session can carry an `orgId` indicating which organization context is currently active. Pass `orgId` during sign-in to scope the session:
+
+```bash
+curl -X POST https://platform.trylath.com/v1/auth/code/verify \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "ada@example.com",
+    "code": "847201",
+    "orgId": "org_01j9..."
+  }'
+```
+
+The session returned will include `orgId` and the contact's `role` within that organization. Validate this server-side using `POST /v1/auth/session/get` before performing any org-scoped operations.
+
+```json Session response with org context
+{
+  "activityId": "act_01j9...",
+  "result": {
+    "sessionToken": "lath_sess_...",
+    "contactId": "con_01j9...",
+    "email": "ada@example.com",
+    "orgId": "org_01j9...",
+    "role": "admin"
+  }
+}
+```
+
+<Note>
+  If a contact belongs to multiple organizations, prompt them to select an active organization after sign-in, then issue an org-scoped session. Do not assume a default organization server-side.
+</Note>
+
+## Complete Flow: Create Org → Invite User → Verify on Sign-In
+
+Here is the end-to-end flow for setting up an organization, onboarding a new user, and verifying their membership when they sign in.
+
+<Steps>
+  <Step title="Create the organization">
+    When your customer first signs up, create an organization for their workspace.
+
+    ```typescript
+    const { result: orgResult } = await lath.auth.org.create({
+      name: "Acme Corp",
+    });
+
+    const orgId = orgResult.orgId;
+    // Store orgId in your database alongside the customer record
+    ```
+  </Step>
+
+  <Step title="Add the founding member">
+    Add the customer's contact as the organization owner.
+
+    ```typescript
+    await lath.auth.org.member.add({
+      orgId,
+      contactId: founderContactId,
+      role: "owner",
+    });
+    ```
+  </Step>
+
+  <Step title="Invite a team member">
+    When the owner invites a colleague, send them a sign-in code. After they verify it, add them to the org.
+
+    ```typescript
+    // Send a sign-in code to the invitee
+    await lath.auth.code.send({ email: "grace@example.com" });
+
+    // After grace verifies the code on your frontend:
+    const { result: sessionResult } = await lath.auth.code.verify({
+      email: "grace@example.com",
+      code: receivedCode,
+    });
+
+    // Add grace to the organization
+    await lath.auth.org.member.add({
+      orgId,
+      contactId: sessionResult.contactId,
+      role: "member",
+    });
+    ```
+  </Step>
+
+  <Step title="Verify membership on each request">
+    On every org-scoped API request, call `session/get` and confirm the session's `orgId` and `role` before proceeding.
+
+    ```typescript
+    const { result: session } = await lath.auth.session.get({
+      sessionToken: req.headers["authorization"]?.replace("Bearer ", ""),
+    });
+
+    if (session.orgId !== expectedOrgId) {
+      throw new Error("Session is not scoped to this organization");
+    }
+
+    if (session.role !== "owner" && session.role !== "admin") {
+      throw new Error("Insufficient permissions");
+    }
+
+    // Proceed with the org-scoped operation
+    ```
+  </Step>
+</Steps>

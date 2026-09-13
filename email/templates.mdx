@@ -1,0 +1,138 @@
+---
+title: "Managing Email Templates in Lath: Draft and Publish"
+sidebarTitle: "Templates"
+description: "Lath email templates support variable substitution, multiple locales, and draft/publish workflow. Templates must be published before they can be sent."
+---
+
+Lath email templates are reusable email designs identified by a slug name (for example, `welcome` or `password-reset`). Each template has a subject, an HTML body, and an optional plain-text fallback. You embed dynamic content using `{{ variableName }}` placeholders, which Lath replaces at render time with the `variables` object you pass in each send request. Templates follow a draft/publish workflow — you can edit freely without affecting live sends until you explicitly publish.
+
+## Draft/publish workflow
+
+Every template exists in two states: **draft** and **published**. Edits you make with `template/set` update the draft. Sends always use the published version. This means you can revise copy, update branding, or add variables without risking broken emails in production — publish only when you're ready.
+
+<Warning>
+  Sending to a template that has never been published returns an error. If you just called `template/set` for the first time, call `template/publish` before triggering any sends.
+</Warning>
+
+## Create or update a template
+
+`POST /v1/email/template/set` creates a new template or updates the draft of an existing one. The `name` field is the identifier — calling `template/set` with the same name again replaces the draft.
+
+<ParamField body="name" type="string" required>
+  A URL-safe slug that identifies the template (for example, `"welcome"` or `"order-confirmation"`). Used as the `template` field in send requests.
+</ParamField>
+
+<ParamField body="subject" type="string" required>
+  The email subject line. Supports `{{ variableName }}` substitution.
+</ParamField>
+
+<ParamField body="html" type="string" required>
+  The full HTML body of the email. Use `{{ variableName }}` wherever you want dynamic content injected.
+</ParamField>
+
+<ParamField body="text" type="string">
+  Plain-text fallback body. Recommended for deliverability. If omitted, Lath generates a stripped-down version from the HTML.
+</ParamField>
+
+<ParamField body="locale" type="string">
+  BCP 47 locale code for this template version (for example, `"en"`, `"fr"`, `"de"`). Defaults to `"en"`. See [Multiple locales](#multiple-locales) below.
+</ParamField>
+
+<ParamField body="variables" type="array">
+  An array of expected variable name strings (for example, `["firstName", "invoiceAmount"]`). Used for documentation and dashboard previews — does not enforce presence at send time.
+</ParamField>
+
+```bash
+curl -X POST https://platform.trylath.com/v1/email/template/set \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "welcome",
+    "subject": "Welcome to Acme, {{ firstName }}!",
+    "html": "<h1>Hi {{ firstName }},</h1><p>Your account is ready.</p>",
+    "text": "Hi {{ firstName }}, your account is ready.",
+    "locale": "en",
+    "variables": ["firstName"]
+  }'
+```
+
+## Publish a template
+
+`POST /v1/email/template/publish` promotes the current draft to the published version. All subsequent sends using this template name will use the newly published content.
+
+<ParamField body="name" type="string" required>
+  The slug name of the template to publish.
+</ParamField>
+
+<ParamField body="locale" type="string">
+  The locale to publish. Defaults to `"en"`. Pass a specific locale (for example, `"fr"`) to publish only that translation without affecting other locales.
+</ParamField>
+
+```bash
+curl -X POST https://platform.trylath.com/v1/email/template/publish \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "welcome" }'
+```
+
+## List and inspect templates
+
+**List all templates** with their publish status using `POST /v1/email/template/list`. The response includes each template's name, locales, and whether a draft differs from the published version.
+
+```bash
+curl -X POST https://platform.trylath.com/v1/email/template/list \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+**Get a single template** — including both draft and published versions — using `POST /v1/email/template/get`:
+
+```bash
+curl -X POST https://platform.trylath.com/v1/email/template/get \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "welcome" }'
+```
+
+## Multiple locales
+
+Call `template/set` with the same `name` and a different `locale` to add a translated version. At send time, Lath checks the contact's `locale` property and delivers the matching locale. If no matching locale exists, Lath falls back to `"en"`.
+
+```bash
+# Add a French translation for the "welcome" template
+curl -X POST https://platform.trylath.com/v1/email/template/set \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "welcome",
+    "subject": "Bienvenue chez Acme, {{ firstName }} !",
+    "html": "<h1>Bonjour {{ firstName }},</h1><p>Votre compte est prêt.</p>",
+    "text": "Bonjour {{ firstName }}, votre compte est prêt.",
+    "locale": "fr",
+    "variables": ["firstName"]
+  }'
+```
+
+You must publish each locale separately. Calling `template/publish` with no locale publishes the `"en"` version; pass `"locale": "fr"` to publish the French translation.
+
+## End-to-end workflow
+
+<Steps>
+  <Step title="Create the template draft">
+    Call `POST /v1/email/template/set` with your template's name, subject, HTML, and variable list. This creates or updates the draft — no live sends are affected.
+  </Step>
+  <Step title="Preview in the dashboard">
+    Open the template in the Lath dashboard and use the preview tool to render it with sample variable values. Check both HTML and plain-text views, and send a test message to your inbox.
+  </Step>
+  <Step title="Publish">
+    Call `POST /v1/email/template/publish` (or click **Publish** in the dashboard) to promote the draft to live. From this point, any `email/send` request using this template name will use the published version.
+  </Step>
+  <Step title="Send">
+    Call `POST /v1/email/send` with `"template": "welcome"` (or whichever name you chose) and a `variables` object containing values for each placeholder. Lath renders the template and delivers it.
+  </Step>
+</Steps>
+
+<Tip>
+  Keep variable names camelCase and document them in the `variables` array when calling `template/set`. The dashboard uses this list to prompt you with sample values during preview.
+</Tip>

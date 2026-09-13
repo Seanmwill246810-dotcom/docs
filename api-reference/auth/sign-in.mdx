@@ -1,0 +1,314 @@
+---
+title: "Auth Sign-In Endpoints: Codes, Links, and Passwords"
+sidebarTitle: "Sign-In"
+description: "REST endpoints for email OTP codes, magic links, and password-based sign-in. Every method creates a contact on first use and returns a session token."
+---
+
+Lath Auth supports three passwordless sign-in methods — 6-digit OTP codes, one-click magic links, and traditional password credentials — all returning the same `sessionToken` on success. Choose the method that best fits your UX: codes are familiar to mobile users, magic links reduce friction for desktop flows, and passwords suit applications where users expect a conventional login form. All three methods create a contact record automatically on first sign-in.
+
+---
+
+## Email OTP Code
+
+### Send a sign-in code
+
+<br />
+
+`POST /v1/auth/code/send`
+
+Sends a 6-digit OTP to the specified email address. The code expires after 10 minutes. Call this endpoint each time a user requests a new code — repeated calls invalidate any previously issued code for that address.
+
+#### Request
+
+<ParamField body="email" type="string" required>
+  The email address to send the sign-in code to.
+</ParamField>
+
+#### Response
+
+<ResponseField name="messageId" type="string">
+  The delivery identifier for the code email. Use this to correlate delivery events.
+</ResponseField>
+
+<ResponseField name="expiresAt" type="string">
+  ISO 8601 timestamp indicating when this code expires.
+</ResponseField>
+
+---
+
+### Verify a sign-in code
+
+<br />
+
+`POST /v1/auth/code/verify`
+
+Verifies the 6-digit code entered by the user. On success, returns a session token you should store securely and attach to subsequent API calls on behalf of the user.
+
+#### Request
+
+<ParamField body="email" type="string" required>
+  The email address the code was sent to.
+</ParamField>
+
+<ParamField body="code" type="string" required>
+  The 6-digit code entered by the user.
+</ParamField>
+
+#### Response
+
+<ResponseField name="sessionToken" type="string">
+  An opaque token representing the authenticated session. Store this server-side or in a secure cookie.
+</ResponseField>
+
+<ResponseField name="contactId" type="string">
+  The Lath contact ID for this user.
+</ResponseField>
+
+<ResponseField name="isNew" type="boolean">
+  `true` if this is the first successful sign-in for this email address — use this to trigger a welcome flow.
+</ResponseField>
+
+---
+
+## Magic Link
+
+### Send a magic link
+
+<br />
+
+`POST /v1/auth/link/send`
+
+Emails a single-use magic link to the specified address. When the user clicks the link, they are redirected to `redirectUri` with a `token` query parameter that you exchange for a session.
+
+#### Request
+
+<ParamField body="email" type="string" required>
+  The email address to send the magic link to.
+</ParamField>
+
+<ParamField body="redirectUri" type="string" required>
+  The URL your application listens on to receive the magic link callback. Must be an HTTPS URL registered in your Lath dashboard.
+</ParamField>
+
+#### Response
+
+<ResponseField name="messageId" type="string">
+  Delivery identifier for the magic link email.
+</ResponseField>
+
+<ResponseField name="expiresAt" type="string">
+  ISO 8601 timestamp indicating when this link expires.
+</ResponseField>
+
+---
+
+### Verify a magic link token
+
+<br />
+
+`POST /v1/auth/link/verify`
+
+Exchanges the `token` query parameter from the magic link callback URL for a session token. Call this from your server as soon as the user lands on the redirect page.
+
+#### Request
+
+<ParamField body="token" type="string" required>
+  The token value from the `?token=` query parameter in the magic link callback URL.
+</ParamField>
+
+#### Response
+
+<ResponseField name="sessionToken" type="string">
+  The authenticated session token.
+</ResponseField>
+
+<ResponseField name="contactId" type="string">
+  The Lath contact ID for this user.
+</ResponseField>
+
+<ResponseField name="isNew" type="boolean">
+  `true` if this is the user's first successful sign-in.
+</ResponseField>
+
+---
+
+## Password
+
+### Set or update a password
+
+<br />
+
+`POST /v1/auth/password/set`
+
+Sets or replaces the password for an existing contact. Call this after the contact is already identified — either through a previous sign-in or an explicit contact creation step. Passwords must be at least 8 characters.
+
+#### Request
+
+<ParamField body="contactId" type="string" required>
+  The Lath contact ID to set a password for.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  The new password. Minimum 8 characters.
+</ParamField>
+
+#### Response
+
+Returns an empty `result` object on success.
+
+---
+
+### Sign in with a password
+
+<br />
+
+`POST /v1/auth/password/verify`
+
+Authenticates a user with their email address and password. Returns a session token on success.
+
+#### Request
+
+<ParamField body="email" type="string" required>
+  The contact's email address.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  The contact's current password.
+</ParamField>
+
+#### Response
+
+<ResponseField name="sessionToken" type="string">
+  The authenticated session token.
+</ResponseField>
+
+<ResponseField name="contactId" type="string">
+  The Lath contact ID for this user.
+</ResponseField>
+
+---
+
+### Send a password reset email
+
+<br />
+
+`POST /v1/auth/password/reset/send`
+
+Sends a password reset link to the contact's email address. The link contains a short-lived token that you exchange with `/v1/auth/password/reset/complete`.
+
+#### Request
+
+<ParamField body="email" type="string" required>
+  The email address of the account to reset.
+</ParamField>
+
+#### Response
+
+Returns an empty `result` object on success.
+
+---
+
+### Complete a password reset
+
+<br />
+
+`POST /v1/auth/password/reset/complete`
+
+Sets a new password using the token from the reset email. After this call succeeds, the token is consumed and cannot be reused.
+
+#### Request
+
+<ParamField body="token" type="string" required>
+  The reset token from the `?token=` query parameter in the reset email link.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  The new password to set. Minimum 8 characters.
+</ParamField>
+
+#### Response
+
+Returns an empty `result` object on success.
+
+---
+
+## Full Email Code Flow
+
+The example below shows a complete send-then-verify sequence using the email OTP method.
+
+<CodeGroup>
+
+```bash cURL
+# Step 1 — Send the code
+curl -X POST https://platform.trylath.com/v1/auth/code/send \
+  -H "Authorization: Bearer lath_live_sk..." \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "ada@example.com" }'
+
+# Step 2 — Verify the code entered by the user
+curl -X POST https://platform.trylath.com/v1/auth/code/verify \
+  -H "Authorization: Bearer lath_live_sk..." \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "ada@example.com", "code": "847291" }'
+```
+
+```typescript TypeScript SDK
+import { Lath } from "@trylath/sdk";
+
+const lath = new Lath({ apiKey: "lath_live_sk..." });
+
+// Step 1 — Send the code
+const { result: sent } = await lath.auth.code.send({
+  email: "ada@example.com",
+});
+console.log("Code expires at:", sent.expiresAt);
+
+// Step 2 — Verify the code entered by the user
+const { result: session } = await lath.auth.code.verify({
+  email: "ada@example.com",
+  code: "847291",
+});
+
+if (session.isNew) {
+  // First-ever sign-in — trigger your welcome flow
+}
+
+console.log("Session token:", session.sessionToken);
+```
+
+```javascript Node.js (fetch)
+// Step 1 — Send the code
+const sendRes = await fetch(
+  "https://platform.trylath.com/v1/auth/code/send",
+  {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer lath_live_sk...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ email: "ada@example.com" }),
+  }
+);
+const { result: sent } = await sendRes.json();
+
+// Step 2 — Verify the code entered by the user
+const verifyRes = await fetch(
+  "https://platform.trylath.com/v1/auth/code/verify",
+  {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer lath_live_sk...",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ email: "ada@example.com", code: "847291" }),
+  }
+);
+const { result: session } = await verifyRes.json();
+console.log("Session token:", session.sessionToken);
+```
+
+</CodeGroup>
+
+<Note>
+  On a successful verify, store `sessionToken` in a secure, HTTP-only cookie or your server-side session store. Pass it to `/v1/auth/session/get` to identify the contact on future requests.
+</Note>

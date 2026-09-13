@@ -1,0 +1,240 @@
+---
+title: "API Authentication for Lath — Secret and Publishable Keys"
+sidebarTitle: "Authentication"
+description: "Lath uses Bearer token authentication — learn secret vs publishable key formats, environment scopes, and how to pass keys on every request."
+---
+
+Every request to the Lath API must include an API key in the `Authorization` header. Lath issues two classes of key — secret and publishable — and two environments — live and test. Choosing the right key for each context keeps your production credentials safe and your development workflow friction-free.
+
+<Warning>
+  Never commit secret keys to source control, paste them into client-side code, or expose them in logs. If a secret key is compromised, rotate it immediately via `POST /v1/developers/key/create` and revoke the old key with `POST /v1/developers/key/revoke`.
+</Warning>
+
+## Key types
+
+Lath API keys follow a consistent naming convention that tells you the key's class and environment at a glance:
+
+| Prefix | Class | Environment | Use |
+|---|---|---|---|
+| `lath_live_sk…` | Secret | Live | Server-side only — Node.js, edge functions, backend services |
+| `lath_test_sk…` | Secret | Test | Server-side only — safe for development and CI |
+| `lath_live_pk…` | Publishable | Live | Browser and mobile clients — production |
+| `lath_test_pk…` | Publishable | Test | Browser and mobile clients — development |
+
+### Secret keys
+
+Secret keys have full access to your project's API surface (subject to any scope restrictions you configure). Keep them on the server. Never embed them in a web page, a mobile app binary, or a public repository.
+
+### Publishable keys
+
+Publishable keys are designed to be embedded in client-side code. They are limited to operations that are safe to perform from a browser — for example, initiating an auth flow or submitting a contact form. They cannot be used to send email or SMS, manage billing, or access other contacts' data.
+
+<Tip>
+  Use test keys (`lath_test_sk…` and `lath_test_pk…`) throughout development and CI. Test keys exercise the full API surface — including all validation and policy gates — but they never deliver real messages, never charge your account, and never touch live contact records.
+</Tip>
+
+## Passing keys in requests
+
+Include your API key as a Bearer token in the `Authorization` header on every request:
+
+```text
+Authorization: Bearer lath_live_sk…
+```
+
+<CodeGroup>
+  ```bash cURL
+  curl -s -X POST https://platform.trylath.com/v1/email/send \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $LATH_SECRET_KEY" \
+    -d '{"to":"user@example.com","template":"tmpl_01j…","topic":"transactional","from":"hello@yourapp.com"}'
+  ```
+
+  ```ts TypeScript
+  import Lath from "@trylath/sdk";
+
+  // The SDK reads LATH_SECRET_KEY from the environment by default
+  const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+  const { result } = await lath.email.send({
+    to: "user@example.com",
+    template: "tmpl_01j…",
+    topic: "transactional",
+    from: "hello@yourapp.com",
+  });
+  ```
+
+  ```python Python
+  import os
+  import requests
+
+  response = requests.post(
+      "https://platform.trylath.com/v1/email/send",
+      headers={
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + os.environ["LATH_SECRET_KEY"],
+      },
+      json={
+          "to": "user@example.com",
+          "template": "tmpl_01j…",
+          "topic": "transactional",
+          "from": "hello@yourapp.com",
+      },
+  )
+  ```
+</CodeGroup>
+
+All Lath endpoints are POST-only. There are no GET, PUT, or DELETE routes.
+
+## Live vs test environments
+
+Your Lath project has two fully isolated environments that share the same API surface:
+
+<Tabs>
+  <Tab title="Live environment">
+    Live keys (`lath_live_sk…`, `lath_live_pk…`) connect to production infrastructure:
+
+    - Messages are delivered to real recipients
+    - Auth flows create real sessions
+    - Charges accrue against your billing balance
+    - Contact records are permanent
+
+    Use live keys only in production deployments and only on the server side.
+  </Tab>
+  <Tab title="Test environment">
+    Test keys (`lath_test_sk…`, `lath_test_pk…`) connect to an isolated sandbox:
+
+    - No messages are delivered to real recipients
+    - No charges accrue
+    - Contact records are scoped to the test environment and do not affect live data
+    - All policy gates (consent, quiet hours, spending cap) still run — so test results reflect production behaviour
+
+    Use test keys in local development, staging, and CI/CD pipelines.
+  </Tab>
+</Tabs>
+
+## Scoped permissions
+
+By default, a secret key has access to all operations in your project. You can create keys with narrower scopes to follow the principle of least privilege — for example, a key used by your email service worker that can only call `email:send`.
+
+Available scopes include:
+
+<Accordion title="Auth scopes">
+  - `auth:read` — read session and user data
+  - `auth:write` — create and revoke sessions, manage users
+</Accordion>
+
+<Accordion title="Email scopes">
+  - `email:send` — send transactional email and trigger automations
+  - `email:read` — read message logs and delivery status
+  - `email:manage` — create and update templates, broadcasts, and automations
+</Accordion>
+
+<Accordion title="SMS scopes">
+  - `sms:send` — send outbound SMS
+  - `sms:read` — read message logs and delivery status
+  - `sms:manage` — manage templates and quiet-hours configuration
+</Accordion>
+
+<Accordion title="Audience scopes">
+  - `audience:read` — read contact records and segments
+  - `audience:write` — create and update contacts, manage consent
+</Accordion>
+
+<Accordion title="Developer scopes">
+  - `developers:keys` — create and revoke API keys
+  - `developers:webhooks` — manage webhook endpoints
+</Accordion>
+
+## Managing API keys
+
+Create, list, and revoke keys programmatically with the Developers API.
+
+### Create a key
+
+<CodeGroup>
+  ```bash cURL
+  curl -s -X POST https://platform.trylath.com/v1/developers/key/create \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $LATH_SECRET_KEY" \
+    -d '{
+      "name": "Email service worker",
+      "scopes": ["email:send"],
+      "environment": "live"
+    }'
+  ```
+
+  ```ts TypeScript
+  import Lath from "@trylath/sdk";
+
+  const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+  const { result } = await lath.developers.key.create({
+    name: "Email service worker",
+    scopes: ["email:send"],
+    environment: "live",
+  });
+
+  // Store result.key securely — it is only returned once
+  console.log(result.key); // lath_live_sk…
+  ```
+</CodeGroup>
+
+```json
+{
+  "activityId": "act_01j…",
+  "result": {
+    "keyId": "key_01j…",
+    "name": "Email service worker",
+    "key": "lath_live_sk…",
+    "scopes": ["email:send"],
+    "environment": "live",
+    "createdAt": "2024-01-15T10:00:00Z"
+  }
+}
+```
+
+<Note>
+  The full key value is only returned once — at creation time. Store it securely. Subsequent calls to `POST /v1/developers/key/list` return key metadata (ID, name, scopes, created date) but not the key value itself.
+</Note>
+
+### Revoke a key
+
+Revoking a key immediately invalidates it. Any in-flight requests that use the revoked key will fail with `401 unauthenticated`. Use this when rotating credentials or decommissioning a service.
+
+<CodeGroup>
+  ```bash cURL
+  curl -s -X POST https://platform.trylath.com/v1/developers/key/revoke \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $LATH_SECRET_KEY" \
+    -d '{"keyId": "key_01j…"}'
+  ```
+
+  ```ts TypeScript
+  import Lath from "@trylath/sdk";
+
+  const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+  await lath.developers.key.revoke({ keyId: "key_01j…" });
+  ```
+</CodeGroup>
+
+## Error codes
+
+Lath returns standard HTTP status codes alongside a structured error body when authentication fails:
+
+| Status | Code | Meaning |
+|---|---|---|
+| `401` | `unauthenticated` | The `Authorization` header is missing, malformed, or contains an invalid key. |
+| `403` | `forbidden` | The key is valid but does not have the scope required for this operation. |
+
+```json
+{
+  "error": {
+    "code": "unauthenticated",
+    "message": "No valid API key was provided. Pass your key as a Bearer token in the Authorization header.",
+    "docsUrl": "https://docs.trylath.com/authentication"
+  }
+}
+```
+
+If you receive a `403 forbidden` error, check the scopes on the key you're using. Create a new key with the required scope via `POST /v1/developers/key/create` if needed.

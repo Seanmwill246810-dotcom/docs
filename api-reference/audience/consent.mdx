@@ -1,0 +1,374 @@
+---
+title: "Audience Consent Endpoints: Grant, Revoke, and Query"
+sidebarTitle: "Consent"
+description: "REST endpoints to grant and revoke contact consent per topic and channel. Retrieve current consent state and a full compliance audit history per contact."
+---
+
+Consent in Lath is a per-contact, per-topic, per-channel record. Before Lath delivers any message it checks that the recipient has an active `granted` consent for the combination of topic and channel being used. You manage consent explicitly through these endpoints — it is never inferred from a send call. Every grant and revoke is appended to an immutable audit log, giving you a full compliance trail.
+
+## Consent model
+
+A consent record has three identifying dimensions:
+
+- **`contactId`** — who the consent belongs to
+- **`topic`** — the messaging category (e.g. `"transactional"`, `"marketing"`, `"alerts"`)
+- **`channel`** — `"email"` or `"sms"`
+
+A contact can have independent consent states for the same topic across channels. Revoking `"marketing"` on `"email"` does not affect `"marketing"` on `"sms"`.
+
+---
+
+## POST /v1/audience/consent/grant
+
+Grant consent for a contact to receive messages on a specific topic and channel.
+
+### Request
+
+<ParamField body="contactId" type="string" required>
+  UUID of the contact being granted consent.
+</ParamField>
+
+<ParamField body="topic" type="string" required>
+  The consent topic (e.g. `"transactional"`, `"marketing"`, `"product-updates"`).
+</ParamField>
+
+<ParamField body="channel" type="string" required>
+  The channel to grant: `"email"` or `"sms"`.
+</ParamField>
+
+<ParamField body="source" type="string">
+  Optional free-text string recorded in the audit log to document how consent was collected (e.g. `"signup-form-v2"`, `"import-2025-09-01"`, `"verbal-confirmation"`). Strongly recommended for compliance documentation.
+</ParamField>
+
+### Response
+
+<ResponseField name="consent.contactId" type="string">
+  The contact the consent belongs to.
+</ResponseField>
+
+<ResponseField name="consent.topic" type="string">
+  The consent topic.
+</ResponseField>
+
+<ResponseField name="consent.channel" type="string">
+  The channel: `"email"` or `"sms"`.
+</ResponseField>
+
+<ResponseField name="consent.status" type="string">
+  Always `"granted"` on success.
+</ResponseField>
+
+<ResponseField name="consent.grantedAt" type="string">
+  ISO 8601 timestamp of when consent was granted.
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/consent/grant \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: grant-marketing-email-ada" \
+  -d '{
+    "contactId": "con_01hx9z3k2q7p4m8w",
+    "topic": "marketing",
+    "channel": "email",
+    "source": "signup-form-v2"
+  }'
+```
+
+```typescript TypeScript SDK
+import { LathClient } from "@trylath/sdk";
+
+const lath = new LathClient({ apiKey: process.env.LATH_SECRET_KEY });
+
+const { result } = await lath.audience.consent.grant({
+  contactId: "con_01hx9z3k2q7p4m8w",
+  topic: "marketing",
+  channel: "email",
+  source: "signup-form-v2",
+});
+
+console.log("Granted at:", result.consent.grantedAt);
+```
+
+</CodeGroup>
+
+<Note>
+  Calling `grant` on a contact that already has an active consent for that topic/channel is a no-op — the existing record is returned unchanged. This makes `grant` safe to call idempotently.
+</Note>
+
+---
+
+## POST /v1/audience/consent/revoke
+
+Revoke a contact's consent for a topic and channel. Future send calls targeting this combination will return `status: "suppressed"`.
+
+### Request
+
+<ParamField body="contactId" type="string" required>
+  UUID of the contact whose consent is being revoked.
+</ParamField>
+
+<ParamField body="topic" type="string" required>
+  The consent topic to revoke.
+</ParamField>
+
+<ParamField body="channel" type="string" required>
+  The channel: `"email"` or `"sms"`.
+</ParamField>
+
+<ParamField body="source" type="string">
+  Optional free-text string recorded in the audit log (e.g. `"unsubscribe-link"`, `"gdpr-deletion-request"`).
+</ParamField>
+
+### Response
+
+<ResponseField name="consent.contactId" type="string">
+  The contact the revocation applies to.
+</ResponseField>
+
+<ResponseField name="consent.topic" type="string">
+  The topic revoked.
+</ResponseField>
+
+<ResponseField name="consent.channel" type="string">
+  The channel revoked.
+</ResponseField>
+
+<ResponseField name="consent.status" type="string">
+  Always `"revoked"` on success.
+</ResponseField>
+
+<ResponseField name="consent.revokedAt" type="string">
+  ISO 8601 timestamp of when consent was revoked.
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/consent/revoke \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contactId": "con_01hx9z3k2q7p4m8w",
+    "topic": "marketing",
+    "channel": "email",
+    "source": "unsubscribe-link"
+  }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.audience.consent.revoke({
+  contactId: "con_01hx9z3k2q7p4m8w",
+  topic: "marketing",
+  channel: "email",
+  source: "unsubscribe-link",
+});
+
+console.log("Revoked at:", result.consent.revokedAt);
+```
+
+</CodeGroup>
+
+<Warning>
+  Revoking `transactional` consent will suppress order confirmations, password resets, and other critical messages. Only revoke transactional consent in response to an explicit request from the contact.
+</Warning>
+
+---
+
+## POST /v1/audience/consent/get
+
+Retrieve the current consent state for a specific topic and channel combination.
+
+### Request
+
+<ParamField body="contactId" type="string" required>
+  UUID of the contact.
+</ParamField>
+
+<ParamField body="topic" type="string" required>
+  The consent topic to look up.
+</ParamField>
+
+<ParamField body="channel" type="string" required>
+  The channel: `"email"` or `"sms"`.
+</ParamField>
+
+### Response
+
+Returns the current consent record with `status` (`"granted"` or `"revoked"`), `grantedAt`, and `revokedAt`. Returns `null` if no consent record exists for this combination.
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/consent/get \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contactId": "con_01hx9z3k2q7p4m8w",
+    "topic": "marketing",
+    "channel": "email"
+  }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.audience.consent.get({
+  contactId: "con_01hx9z3k2q7p4m8w",
+  topic: "marketing",
+  channel: "email",
+});
+
+if (result.consent?.status === "granted") {
+  console.log("Contact has active consent");
+} else {
+  console.log("No active consent — do not send");
+}
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/audience/consent/list
+
+Retrieve all current consent records for a contact across all topics and channels.
+
+### Request
+
+<ParamField body="contactId" type="string" required>
+  UUID of the contact whose consent records you want.
+</ParamField>
+
+### Response
+
+Returns `{ consents: [{ topic, channel, status, grantedAt, revokedAt }] }` — one object per unique topic/channel combination that has ever had a consent event.
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/consent/list \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{ "contactId": "con_01hx9z3k2q7p4m8w" }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.audience.consent.list({
+  contactId: "con_01hx9z3k2q7p4m8w",
+});
+
+for (const c of result.consents) {
+  console.log(`${c.topic} / ${c.channel}: ${c.status}`);
+}
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/audience/consent/history
+
+Retrieve the full append-only audit log of all consent events for a contact. Every grant and revoke is recorded as a separate entry, giving you a complete compliance trail.
+
+### Request
+
+<ParamField body="contactId" type="string" required>
+  UUID of the contact.
+</ParamField>
+
+<ParamField body="topic" type="string">
+  Filter the log to a specific topic. Omit to return events for all topics.
+</ParamField>
+
+<ParamField body="channel" type="string">
+  Filter the log to a specific channel (`"email"` or `"sms"`). Omit to return events for all channels.
+</ParamField>
+
+### Response
+
+Returns `{ events: [{ eventType, topic, channel, source, occurredAt }] }` sorted by `occurredAt` ascending.
+
+<ResponseField name="events[].eventType" type="string">
+  `"granted"` or `"revoked"`.
+</ResponseField>
+
+<ResponseField name="events[].topic" type="string">
+  The topic this event applies to.
+</ResponseField>
+
+<ResponseField name="events[].channel" type="string">
+  The channel this event applies to.
+</ResponseField>
+
+<ResponseField name="events[].source" type="string | null">
+  The `source` string provided when the consent was granted or revoked, or `null` if none was provided.
+</ResponseField>
+
+<ResponseField name="events[].occurredAt" type="string">
+  ISO 8601 timestamp of when this event occurred.
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/consent/history \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contactId": "con_01hx9z3k2q7p4m8w",
+    "topic": "marketing",
+    "channel": "email"
+  }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.audience.consent.history({
+  contactId: "con_01hx9z3k2q7p4m8w",
+  topic: "marketing",
+  channel: "email",
+});
+
+for (const event of result.events) {
+  console.log(`[${event.occurredAt}] ${event.eventType} via ${event.source ?? "unknown"}`);
+}
+```
+
+</CodeGroup>
+
+### Example history response
+
+```json
+{
+  "activityId": "act_01hx9z3k2q7p4m8w",
+  "result": {
+    "events": [
+      {
+        "eventType": "granted",
+        "topic": "marketing",
+        "channel": "email",
+        "source": "signup-form-v2",
+        "occurredAt": "2025-01-10T08:22:00Z"
+      },
+      {
+        "eventType": "revoked",
+        "topic": "marketing",
+        "channel": "email",
+        "source": "unsubscribe-link",
+        "occurredAt": "2025-03-15T14:05:00Z"
+      },
+      {
+        "eventType": "granted",
+        "topic": "marketing",
+        "channel": "email",
+        "source": "re-subscribe-form",
+        "occurredAt": "2025-06-01T09:00:00Z"
+      }
+    ]
+  }
+}
+```
+
+<Tip>
+  Use the audit log when responding to data subject access requests (DSARs) under GDPR or CCPA. The history endpoint gives you a complete record of every consent decision, including the source system.
+</Tip>

@@ -1,0 +1,227 @@
+---
+title: "OAuth Sign-In Endpoints: Google, Microsoft, and GitHub"
+sidebarTitle: "OAuth"
+description: "REST endpoints for social OAuth sign-in. Configure a provider, redirect users to the authorization URL, and exchange the callback code for a session token."
+---
+
+Lath Auth handles the OAuth handshake with Google, Microsoft, and GitHub so you don't have to manage token exchanges or provider-specific edge cases. Store your OAuth app credentials once with `/v1/auth/oauth/app/set`, then use the two-step begin-and-complete flow every time a user wants to sign in socially. On completion, Lath matches the provider identity to an existing contact or creates a new one, and returns a standard Lath session token.
+
+---
+
+## Configure an OAuth provider
+
+`POST /v1/auth/oauth/app/set`
+
+Stores your OAuth application credentials for a given provider. You only need to call this once per provider, or again when you rotate credentials. Credentials are stored encrypted and never returned in subsequent API responses.
+
+### Request
+
+<ParamField body="provider" type="string" required>
+  The OAuth provider to configure. One of: `google`, `microsoft`, `github`.
+</ParamField>
+
+<ParamField body="clientId" type="string" required>
+  Your OAuth application's client ID, obtained from the provider's developer console.
+</ParamField>
+
+<ParamField body="clientSecret" type="string" required>
+  Your OAuth application's client secret. Treat this like a password — never expose it in client-side code.
+</ParamField>
+
+### Response
+
+<ResponseField name="provider" type="string">
+  The provider that was configured.
+</ResponseField>
+
+<ResponseField name="configured" type="boolean">
+  Always `true` on a successful call.
+</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/auth/oauth/app/set \
+  -H "Authorization: Bearer lath_live_sk..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "google",
+    "clientId": "1234567890-abc.apps.googleusercontent.com",
+    "clientSecret": "GOCSPX-..."
+  }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.auth.oauth.app.set({
+  provider: "google",
+  clientId: "1234567890-abc.apps.googleusercontent.com",
+  clientSecret: "GOCSPX-...",
+});
+
+console.log(result.provider, "configured:", result.configured);
+```
+
+</CodeGroup>
+
+---
+
+## Begin an OAuth flow
+
+`POST /v1/auth/oauth/begin`
+
+Generates the provider's authorization URL for a given provider and redirect URI. Redirect your user's browser to the returned `authorizationUrl` to start the OAuth consent flow. Lath embeds a `state` parameter in the URL to prevent CSRF attacks — do not strip it.
+
+### Request
+
+<ParamField body="provider" type="string" required>
+  The OAuth provider to sign in with. One of: `google`, `microsoft`, `github`.
+</ParamField>
+
+<ParamField body="redirectUri" type="string" required>
+  The URL your application listens on to receive the OAuth callback. This must exactly match one of the redirect URIs registered in your provider's developer console.
+</ParamField>
+
+### Response
+
+<ResponseField name="authorizationUrl" type="string">
+  The full authorization URL to redirect the user to. Includes all required query parameters — `client_id`, `scope`, `state`, and `redirect_uri`.
+</ResponseField>
+
+---
+
+## Complete an OAuth flow
+
+`POST /v1/auth/oauth/complete`
+
+Exchanges the `code` and `state` parameters from the OAuth callback URL for a Lath session token. Call this from your server as soon as the user lands on your redirect URI.
+
+### Request
+
+<ParamField body="code" type="string" required>
+  The authorization code from the `?code=` query parameter in the provider's callback.
+</ParamField>
+
+<ParamField body="state" type="string" required>
+  The state value from the `?state=` query parameter in the provider's callback. Lath validates this to prevent CSRF attacks.
+</ParamField>
+
+### Response
+
+<ResponseField name="sessionToken" type="string">
+  The authenticated Lath session token. Store this securely.
+</ResponseField>
+
+<ResponseField name="contactId" type="string">
+  The Lath contact ID for this user.
+</ResponseField>
+
+<ResponseField name="isNew" type="boolean">
+  `true` if this is the first time Lath has seen this provider identity — use this to trigger a welcome flow.
+</ResponseField>
+
+<ResponseField name="provider" type="string">
+  The provider that completed the sign-in (e.g. `google`).
+</ResponseField>
+
+---
+
+## Full OAuth sign-in flow
+
+The following example walks through configuring Google OAuth and then signing a user in from scratch.
+
+<Steps>
+
+  <Step title="Configure your OAuth app credentials (once)">
+    Store your Google OAuth credentials in Lath. You only need to do this once — or again when you rotate secrets.
+
+    <CodeGroup>
+
+    ```bash cURL
+    curl -X POST https://platform.trylath.com/v1/auth/oauth/app/set \
+      -H "Authorization: Bearer lath_live_sk..." \
+      -H "Content-Type: application/json" \
+      -d '{
+        "provider": "google",
+        "clientId": "1234567890-abc.apps.googleusercontent.com",
+        "clientSecret": "GOCSPX-..."
+      }'
+    ```
+
+    ```typescript TypeScript SDK
+    await lath.auth.oauth.app.set({
+      provider: "google",
+      clientId: "1234567890-abc.apps.googleusercontent.com",
+      clientSecret: "GOCSPX-...",
+    });
+    ```
+
+    </CodeGroup>
+  </Step>
+
+  <Step title="Generate the authorization URL and redirect the user">
+    When the user clicks "Sign in with Google", call `/v1/auth/oauth/begin` and redirect their browser to the returned URL.
+
+    <CodeGroup>
+
+    ```bash cURL
+    curl -X POST https://platform.trylath.com/v1/auth/oauth/begin \
+      -H "Authorization: Bearer lath_live_sk..." \
+      -H "Content-Type: application/json" \
+      -d '{
+        "provider": "google",
+        "redirectUri": "https://yourapp.com/auth/callback"
+      }'
+    # Returns: { "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth?..." }
+    ```
+
+    ```typescript TypeScript SDK
+    const { result } = await lath.auth.oauth.begin({
+      provider: "google",
+      redirectUri: "https://yourapp.com/auth/callback",
+    });
+
+    // Redirect the user — e.g. in an Express handler:
+    res.redirect(result.authorizationUrl);
+    ```
+
+    </CodeGroup>
+  </Step>
+
+  <Step title="Exchange the callback code for a session token">
+    After the user approves access, Google redirects them to your `redirectUri` with `?code=...&state=...` in the query string. Exchange these for a Lath session token.
+
+    <CodeGroup>
+
+    ```bash cURL
+    curl -X POST https://platform.trylath.com/v1/auth/oauth/complete \
+      -H "Authorization: Bearer lath_live_sk..." \
+      -H "Content-Type: application/json" \
+      -d '{
+        "code": "4/0AcvDMrBw...",
+        "state": "lath_state_7xq2..."
+      }'
+    ```
+
+    ```typescript TypeScript SDK
+    // In your callback route handler:
+    const { code, state } = req.query;
+
+    const { result } = await lath.auth.oauth.complete({ code, state });
+
+    if (result.isNew) {
+      // First-ever sign-in — trigger your welcome flow
+    }
+
+    // Set the session token in a secure cookie
+    res.cookie("session", result.sessionToken, { httpOnly: true, secure: true });
+    res.redirect("/dashboard");
+    ```
+
+    </CodeGroup>
+  </Step>
+
+</Steps>
+
+<Note>
+  Lath automatically links the OAuth identity to an existing contact if the provider returns an email address that already exists in your audience. If no match is found, a new contact is created and `isNew` will be `true`.
+</Note>

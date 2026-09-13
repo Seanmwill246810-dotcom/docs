@@ -1,0 +1,229 @@
+---
+title: "The Lath Contact: One Record for Auth, Email, and SMS"
+sidebarTitle: "Contacts"
+description: "A Lath contact holds identity, email address, phone number, and consent for both channels on one row that auth, email, and SMS all read and write."
+---
+
+A contact is the central record that every part of Lath is built around. When a user signs up, receives a transactional email, or replies STOP to an SMS, Lath reads and writes the same contact row — there are no sync jobs, no duplicate records, and no reconciliation logic for you to maintain. Auth, email, and SMS all share a single source of truth.
+
+## Contact fields
+
+Every contact carries a standard set of fields alongside an open-ended `properties` map for anything specific to your application.
+
+<ResponseField name="id" type="string (UUID)" required>
+  The unique identifier for the contact. Use this in all subsequent API calls.
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  The contact's email address. Either `email` or `phone` must be present.
+</ResponseField>
+
+<ResponseField name="phone" type="string">
+  The contact's phone number in E.164 format (e.g., `+14155552671`). Either `phone` or `email` must be present.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  The contact's display name. Optional but recommended for personalized messaging.
+</ResponseField>
+
+<ResponseField name="locale" type="string">
+  BCP 47 locale tag (e.g. `en-US`, `fr-FR`). Lath uses this to select the correct translation when sending a multi-language template.
+</ResponseField>
+
+<ResponseField name="properties" type="object">
+  Arbitrary key/value pairs you define — for example, `plan`, `onboardingStep`, or `mrr`. Values can be strings, numbers, or booleans. Set these via `audience.contact.update` or the `property.set` step in an automation.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string (ISO 8601)">
+  Timestamp of when the contact was first created.
+</ResponseField>
+
+### The `properties` field
+
+`properties` is a free-form key/value store attached to every contact. Use it to persist any application-specific data you want accessible in templates, automation conditions, or segment filters — without building a separate data store. Common examples:
+
+| Key | Example value | Use case |
+|-----|---------------|----------|
+| `plan` | `"pro"` | Gate email content by subscription tier |
+| `onboardingStep` | `3` | Resume an automation mid-flow |
+| `mrr` | `149` | Personalise upsell messaging |
+| `trialEndsAt` | `"2024-06-01"` | Trigger upgrade reminders at the right time |
+
+---
+
+## Creating a contact
+
+Send a `POST` request to `/v1/audience/contact/create`. Supply at least one of `email` or `phone`. You can provide both.
+
+### Request body
+
+<ParamField body="email" type="string">
+  The contact's email address.
+</ParamField>
+
+<ParamField body="phone" type="string">
+  The contact's phone number in E.164 format.
+</ParamField>
+
+<ParamField body="name" type="string">
+  A display name for the contact.
+</ParamField>
+
+<ParamField body="locale" type="string">
+  BCP 47 locale tag (e.g. `en-US`, `fr-FR`). Used to select template translations at send time.
+</ParamField>
+
+<ParamField body="properties" type="object">
+  Initial key/value properties to attach to the contact. Values can be strings, numbers, or booleans.
+</ParamField>
+
+### Response
+
+Every Lath response wraps the result in a standard envelope:
+
+```json
+{
+  "activityId": "act_01hx...",
+  "result": {
+    "id": "con_01hx...",
+    "email": "ada@example.com",
+    "phone": "+14155552671",
+    "name": "Ada Lovelace",
+    "locale": "en-US",
+    "properties": {
+      "plan": "pro",
+      "onboardingStep": 1
+    },
+    "createdAt": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+<CodeGroup>
+
+```typescript TypeScript SDK
+import Lath from "@trylath/sdk";
+
+const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+const { result: contact } = await lath.audience.contact.create({
+  email: "ada@example.com",
+  phone: "+14155552671",
+  name: "Ada Lovelace",
+  locale: "en-US",
+  properties: {
+    plan: "pro",
+    onboardingStep: 1,
+  },
+});
+
+console.log(contact.id); // con_01hx...
+```
+
+```bash REST (curl)
+curl -X POST https://platform.trylath.com/v1/audience/contact/create \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "ada@example.com",
+    "phone": "+14155552671",
+    "name": "Ada Lovelace",
+    "locale": "en-US",
+    "properties": {
+      "plan": "pro",
+      "onboardingStep": 1
+    }
+  }'
+```
+
+</CodeGroup>
+
+<Note>
+  When a user signs in through Lath Auth, Lath automatically creates or matches the existing contact — you don't need to call `audience.contact.create` separately. The auth flow and the contact record stay in sync without any extra work on your end.
+</Note>
+
+---
+
+## Looking up a contact
+
+Use `POST /v1/audience/contact/get` to retrieve a contact by their ID, email address, or phone number.
+
+<ParamField body="contactId" type="string">
+  The contact's UUID, returned when the contact was created.
+</ParamField>
+
+<ParamField body="email" type="string">
+  Look up by email address. Provide one of `contactId`, `email`, or `phone`.
+</ParamField>
+
+<ParamField body="phone" type="string">
+  Look up by phone number in E.164 format. Provide one of `contactId`, `email`, or `phone`.
+</ParamField>
+
+<CodeGroup>
+
+```typescript TypeScript SDK
+// By contact ID
+const { result: contact } = await lath.audience.contact.get({
+  contactId: "con_01hx...",
+});
+
+// By email address
+const { result: contactByEmail } = await lath.audience.contact.get({
+  email: "ada@example.com",
+});
+
+// By phone number
+const { result: contactByPhone } = await lath.audience.contact.get({
+  phone: "+14155552671",
+});
+```
+
+```bash REST (curl)
+# By contact ID
+curl -X POST https://platform.trylath.com/v1/audience/contact/get \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "contactId": "con_01hx..." }'
+
+# By email address
+curl -X POST https://platform.trylath.com/v1/audience/contact/get \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "ada@example.com" }'
+```
+
+</CodeGroup>
+
+---
+
+## Updating a contact
+
+Use `POST /v1/audience/contact/update` to modify any field — including `properties`. Pass only the fields you want to change; all others are left untouched.
+
+<CodeGroup>
+
+```typescript TypeScript SDK
+await lath.audience.contact.update({
+  contactId: "con_01hx...",
+  properties: {
+    plan: "enterprise",
+    onboardingStep: "complete",
+  },
+});
+```
+
+```bash REST (curl)
+curl -X POST https://platform.trylath.com/v1/audience/contact/update \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contactId": "con_01hx...",
+    "properties": {
+      "plan": "enterprise",
+      "onboardingStep": "complete"
+    }
+  }'
+```
+
+</CodeGroup>

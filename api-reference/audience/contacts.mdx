@@ -1,0 +1,335 @@
+---
+title: "Audience Contact Endpoints: Create, Update, and Look Up"
+sidebarTitle: "Contacts"
+description: "REST endpoints to create, read, update, list, and merge contacts. Each contact record holds email, phone, name, locale, and an open-ended properties map."
+---
+
+The contact is Lath's unified record for a person. It ties together an email address, a phone number, a name, a preferred locale, and an open-ended `properties` map where you can store any application-specific data. Every email send, SMS, consent grant, and automation run references a contact by ID, so keeping contact records accurate and deduplicated is important for reliable delivery and compliance.
+
+## POST /v1/audience/contact/create
+
+Create a new contact record. At least one of `email` or `phone` is required.
+
+### Request
+
+<ParamField body="email" type="string">
+  The contact's email address. Must be unique within your project. Required if `phone` is not provided.
+</ParamField>
+
+<ParamField body="phone" type="string">
+  The contact's phone number in E.164 format (e.g. `"+14155551234"`). Must be unique within your project. Required if `email` is not provided.
+</ParamField>
+
+<ParamField body="name" type="string">
+  Full display name (e.g. `"Ada Lovelace"`).
+</ParamField>
+
+<ParamField body="locale" type="string">
+  BCP 47 locale tag representing the contact's preferred language (e.g. `"en"`, `"fr-CA"`). Used to select the right template locale at send time.
+</ParamField>
+
+<ParamField body="properties" type="object">
+  Arbitrary key-value pairs to store on the contact (e.g. `{ "plan": "pro", "signupSource": "google" }`). Values may be strings, numbers, booleans, or `null`. Nested objects are not supported.
+</ParamField>
+
+### Response
+
+<ResponseField name="contact.id" type="string">
+  UUID assigned to this contact.
+</ResponseField>
+
+<ResponseField name="contact.email" type="string | null">
+  The contact's email address.
+</ResponseField>
+
+<ResponseField name="contact.phone" type="string | null">
+  The contact's phone number in E.164 format.
+</ResponseField>
+
+<ResponseField name="contact.name" type="string | null">
+  The contact's display name.
+</ResponseField>
+
+<ResponseField name="contact.locale" type="string | null">
+  The contact's preferred locale.
+</ResponseField>
+
+<ResponseField name="contact.properties" type="object">
+  The stored properties map.
+</ResponseField>
+
+<ResponseField name="contact.createdAt" type="string">
+  ISO 8601 timestamp of when the contact was created.
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/contact/create \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: create-contact-ada-lovelace" \
+  -d '{
+    "email": "ada@example.com",
+    "phone": "+14155551234",
+    "name": "Ada Lovelace",
+    "locale": "en",
+    "properties": {
+      "plan": "pro",
+      "signupSource": "google"
+    }
+  }'
+```
+
+```typescript TypeScript SDK
+import { LathClient } from "@trylath/sdk";
+
+const lath = new LathClient({ apiKey: process.env.LATH_SECRET_KEY });
+
+const { result } = await lath.audience.contacts.create({
+  email: "ada@example.com",
+  phone: "+14155551234",
+  name: "Ada Lovelace",
+  locale: "en",
+  properties: {
+    plan: "pro",
+    signupSource: "google",
+  },
+});
+
+console.log("Contact ID:", result.contact.id);
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/audience/contact/get
+
+Look up a single contact by ID, email address, or phone number. Provide exactly one lookup field.
+
+### Request
+
+<ParamField body="contactId" type="string">
+  The UUID of the contact to retrieve.
+</ParamField>
+
+<ParamField body="email" type="string">
+  Look up by email address. Returns the contact whose `email` field matches exactly.
+</ParamField>
+
+<ParamField body="phone" type="string">
+  Look up by E.164 phone number. Returns the contact whose `phone` field matches exactly.
+</ParamField>
+
+### Response
+
+Returns the full contact object (same shape as the create response).
+
+<CodeGroup>
+
+```bash curl — by ID
+curl -X POST https://platform.trylath.com/v1/audience/contact/get \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{ "contactId": "con_01hx9z3k2q7p4m8w" }'
+```
+
+```bash curl — by email
+curl -X POST https://platform.trylath.com/v1/audience/contact/get \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "ada@example.com" }'
+```
+
+```typescript TypeScript SDK
+// By ID
+const { result } = await lath.audience.contacts.get({
+  contactId: "con_01hx9z3k2q7p4m8w",
+});
+
+// By email
+const { result: byEmail } = await lath.audience.contacts.get({
+  email: "ada@example.com",
+});
+
+console.log("Plan:", byEmail.contact.properties.plan);
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/audience/contact/update
+
+Update one or more fields on an existing contact. Only the fields you include in the request are changed — omitting a field leaves it unchanged. Pass `null` explicitly to clear a field.
+
+### Request
+
+<ParamField body="contactId" type="string" required>
+  UUID of the contact to update.
+</ParamField>
+
+<ParamField body="email" type="string | null">
+  New email address. Pass `null` to clear.
+</ParamField>
+
+<ParamField body="phone" type="string | null">
+  New phone number in E.164 format. Pass `null` to clear.
+</ParamField>
+
+<ParamField body="name" type="string | null">
+  New display name. Pass `null` to clear.
+</ParamField>
+
+<ParamField body="locale" type="string | null">
+  New preferred locale. Pass `null` to clear.
+</ParamField>
+
+<ParamField body="properties" type="object">
+  Properties to merge into the existing map. Keys you include are set or overwritten; keys you omit are preserved. Pass `null` as a value to remove a specific property key.
+</ParamField>
+
+### Response
+
+Returns the full updated contact object.
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/contact/update \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contactId": "con_01hx9z3k2q7p4m8w",
+    "name": "Ada King",
+    "properties": {
+      "plan": "enterprise",
+      "signupSource": null
+    }
+  }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.audience.contacts.update({
+  contactId: "con_01hx9z3k2q7p4m8w",
+  name: "Ada King",
+  properties: {
+    plan: "enterprise",
+    signupSource: null, // removes this key
+  },
+});
+
+console.log("Updated name:", result.contact.name);
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/audience/contact/list
+
+Retrieve a paginated list of contacts in your project.
+
+### Request
+
+<ParamField body="limit" type="integer">
+  Maximum number of contacts to return per page. Defaults to `50`, maximum `200`.
+</ParamField>
+
+<ParamField body="cursor" type="string">
+  Pagination cursor from the previous response's `nextCursor` field. Omit to start from the beginning.
+</ParamField>
+
+### Response
+
+<ResponseField name="contacts" type="array">
+  Array of contact objects for this page.
+</ResponseField>
+
+<ResponseField name="nextCursor" type="string | null">
+  Cursor to pass in the next request to fetch the following page. `null` when you have reached the last page.
+</ResponseField>
+
+<ResponseField name="total" type="integer">
+  Total number of contacts in your project.
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/contact/list \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{ "limit": 100 }'
+```
+
+```typescript TypeScript SDK
+let cursor: string | null = null;
+
+do {
+  const { result } = await lath.audience.contacts.list({
+    limit: 100,
+    cursor: cursor ?? undefined,
+  });
+
+  for (const contact of result.contacts) {
+    console.log(contact.id, contact.email);
+  }
+
+  cursor = result.nextCursor;
+} while (cursor !== null);
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/audience/contact/merge
+
+Merge two contacts into one. The `sourceContactId` contact is merged into `targetContactId`. After merging, the source contact is deleted. All consent records, message history, and automation runs associated with the source are re-attributed to the target.
+
+### Request
+
+<ParamField body="sourceContactId" type="string" required>
+  UUID of the contact to merge from. This contact is deleted after the merge.
+</ParamField>
+
+<ParamField body="targetContactId" type="string" required>
+  UUID of the contact to merge into. This contact is retained.
+</ParamField>
+
+### Response
+
+Returns the updated `targetContactId` contact object with all merged data.
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/contact/merge \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sourceContactId": "con_01hx9z3k2q7p4m8w",
+    "targetContactId": "con_01hx9z3k2q7p4m8x"
+  }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.audience.contacts.merge({
+  sourceContactId: "con_01hx9z3k2q7p4m8w",
+  targetContactId: "con_01hx9z3k2q7p4m8x",
+});
+
+console.log("Merged into:", result.contact.id);
+```
+
+</CodeGroup>
+
+<Warning>
+  Merging is irreversible. The source contact is permanently deleted. In the event of a field conflict (both contacts have different email addresses), the target's value takes precedence.
+</Warning>
+
+<Note>
+  A common use case for merging is unifying anonymous and authenticated contact records after a user logs in. Create an anonymous contact on first visit, then merge it into the authenticated contact once the user signs in.
+</Note>

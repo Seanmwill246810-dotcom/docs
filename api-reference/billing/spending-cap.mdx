@@ -1,0 +1,323 @@
+---
+title: "Billing Endpoints: Spending Caps, Usage, and Invoices"
+sidebarTitle: "Spending Cap"
+description: "Set a hard monthly spending cap, monitor real-time usage by product, and retrieve invoices. Suppressed messages are never billed to your account."
+---
+
+The Billing API gives you precise control over how much Lath can spend on your behalf each month. Set a hard spending cap to protect against runaway costs, monitor real-time usage broken down by product, and pull invoice history for your accounting workflows. Every endpoint is authenticated with your secret key and returns the standard `{ activityId, result }` envelope.
+
+<Warning>
+  You must set a spending cap before Lath will send any messages. A brand-new
+  account has no cap configured — every send attempt will fail with a
+  `spending_cap_not_set` error until you call `billing/cap/set`.
+</Warning>
+
+---
+
+## Spending cap
+
+The spending cap is a hard monthly ceiling on total spend. When the cap is reached, all outbound sends (email, SMS, and auth MAU increments) return `402 spending_cap_reached` immediately and nothing is queued or retried. The cap resets at the start of each billing period.
+
+### `POST /v1/billing/cap/set`
+
+Sets — or updates — the monthly spending cap for the current billing period. You can raise or lower the cap at any time. Setting it to `0` effectively pauses all sending.
+
+<Tabs>
+  <Tab title="Request">
+    <ParamField body="monthlyCapCents" type="integer" required>
+      The maximum total spend for the billing period, in cents. Must be a
+      non-negative integer. For example, `5000` represents a $50.00 USD cap.
+    </ParamField>
+  </Tab>
+  <Tab title="Response">
+    <ResponseField name="cap" type="object">
+      The newly applied cap configuration.
+      <Expandable title="cap">
+        <ResponseField name="monthlyCapCents" type="integer">
+          The cap value you just set, in cents.
+        </ResponseField>
+        <ResponseField name="currency" type="string">
+          The billing currency for your account (e.g. `USD`, `EUR`).
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Tab>
+</Tabs>
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/billing/cap/set \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"monthlyCapCents": 5000}'
+```
+
+```ts TypeScript
+import { LathClient } from "@trylath/sdk";
+
+const client = new LathClient({ apiKey: process.env.LATH_SECRET_KEY });
+
+const { result } = await client.billing.cap.set({
+  monthlyCapCents: 5000, // $50.00 USD
+});
+
+console.log(result.cap.currency); // e.g. "USD"
+```
+
+```python Python
+import lath
+
+client = lath.Client(api_key=os.environ["LATH_SECRET_KEY"])
+
+result = client.billing.cap.set(monthly_cap_cents=5000)
+print(result.cap.currency)  # e.g. "USD"
+```
+</CodeGroup>
+
+<Tip>
+  Pass the `Idempotency-Key` header when updating the spending cap in automated
+  pipelines to prevent duplicate updates if your request is retried.
+</Tip>
+
+---
+
+### `POST /v1/billing/cap/get`
+
+Returns the current spending cap and how much of it has been consumed in the active billing period.
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/billing/cap/get \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+```ts TypeScript
+const { result } = await client.billing.cap.get();
+
+const { monthlyCapCents, currency } = result.cap;
+const remaining = monthlyCapCents - result.usedCents;
+
+console.log(`$${remaining / 100} ${currency} remaining this period`);
+```
+</CodeGroup>
+
+---
+
+## Usage
+
+Track spending in real time before you hit your cap. Usage is broken down by product so you can see exactly where costs are accumulating.
+
+### `POST /v1/billing/usage/get`
+
+Returns usage for the current billing period, broken down by product and totalled in cents.
+
+<ResponseField name="period" type="object">
+  The start and end dates of the current billing period.
+</ResponseField>
+<ResponseField name="auth" type="object">
+  Monthly active users counted this period and the cost in cents.
+</ResponseField>
+<ResponseField name="email" type="object">
+  Emails delivered this period and the cost in cents.
+</ResponseField>
+<ResponseField name="sms" type="object">
+  SMS segments sent this period and the cost in cents.
+</ResponseField>
+<ResponseField name="totalCents" type="integer">
+  Aggregate spend across all products for the current period.
+</ResponseField>
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/billing/usage/get \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+```ts TypeScript
+const { result } = await client.billing.usage.get();
+
+console.log("Email sends:", result.email.count);
+console.log("SMS segments:", result.sms.count);
+console.log("Total spend:", `$${result.totalCents / 100}`);
+```
+</CodeGroup>
+
+---
+
+### `POST /v1/billing/usage/list`
+
+Returns historical usage across past billing periods, paginated from most recent to oldest.
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/billing/usage/list \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+```ts TypeScript
+const { result } = await client.billing.usage.list();
+
+for (const period of result.periods) {
+  console.log(period.startDate, period.totalCents);
+}
+```
+</CodeGroup>
+
+---
+
+## Invoices
+
+Retrieve finalized invoices for record-keeping, reconciliation, or forwarding to finance. Invoices are generated at the end of each billing period.
+
+### `POST /v1/billing/invoice/list`
+
+Lists all invoices on the account, ordered by most recent first, with their status and totals.
+
+<ResponseField name="invoices" type="array">
+  Array of invoice summaries.
+  <Expandable title="invoice">
+    <ResponseField name="invoiceId" type="string">
+      Unique identifier for the invoice.
+    </ResponseField>
+    <ResponseField name="status" type="string">
+      One of `pending`, `paid`, or `void`.
+    </ResponseField>
+    <ResponseField name="period" type="object">
+      The billing period start and end dates covered by this invoice.
+    </ResponseField>
+    <ResponseField name="totalCents" type="integer">
+      Total amount billed, in cents.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/billing/invoice/list \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+```ts TypeScript
+const { result } = await client.billing.invoice.list();
+
+const paid = result.invoices.filter((inv) => inv.status === "paid");
+console.log(`${paid.length} paid invoice(s)`);
+```
+</CodeGroup>
+
+---
+
+### `POST /v1/billing/invoice/get`
+
+Returns a single invoice in full detail, including a line-item breakdown by product.
+
+<ParamField body="invoiceId" type="string" required>
+  The ID of the invoice to retrieve.
+</ParamField>
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/billing/invoice/get \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"invoiceId": "inv_01abc"}'
+```
+
+```ts TypeScript
+const { result } = await client.billing.invoice.get({
+  invoiceId: "inv_01abc",
+});
+
+for (const line of result.lineItems) {
+  console.log(line.product, line.units, line.totalCents);
+}
+```
+</CodeGroup>
+
+---
+
+## Pricing model
+
+Lath charges per unit of consumption. Suppressed sends — messages that were blocked before delivery (e.g. due to unsubscribe status or a quiet-hours rule) — are never billed.
+
+| Product | Billed unit | Notes |
+|---|---|---|
+| Email | Per email delivered | Suppressed sends are not billed |
+| SMS | Per segment sent | UCS-2 (non-GSM-7) messages consume more segments per message body |
+| Auth | Per monthly active user | Each unique person is counted only once per billing period regardless of session count |
+
+<Note>
+  Per-unit pricing will be published before Lath's general availability launch.
+  The billing engine records exact consumption now — rates will appear in this
+  table once finalised. You will never be charged without seeing the rate first.
+</Note>
+
+---
+
+## Quick-start: set your spending cap
+
+Before you send anything, configure a cap that matches your expected volume. Here is the minimal setup to get your account ready to send:
+
+<Steps>
+  <Step title="Set a monthly cap">
+    Choose a cap that gives you headroom above your expected volume. You can
+    adjust it at any time.
+
+    <CodeGroup>
+    ```bash cURL
+    curl -X POST https://platform.trylath.com/v1/billing/cap/set \
+      -H "Authorization: Bearer $LATH_SECRET_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{"monthlyCapCents": 5000}'
+    ```
+
+    ```ts TypeScript
+    await client.billing.cap.set({ monthlyCapCents: 5000 });
+    ```
+    </CodeGroup>
+  </Step>
+  <Step title="Verify the cap is active">
+    Confirm the cap is in place and check your remaining balance before
+    triggering a large send.
+
+    <CodeGroup>
+    ```bash cURL
+    curl -X POST https://platform.trylath.com/v1/billing/cap/get \
+      -H "Authorization: Bearer $LATH_SECRET_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{}'
+    ```
+
+    ```ts TypeScript
+    const { result } = await client.billing.cap.get();
+    console.log("Cap active:", result.cap.monthlyCapCents, "cents");
+    ```
+    </CodeGroup>
+  </Step>
+  <Step title="Monitor usage during the period">
+    Poll `billing/usage/get` or set up a webhook on the
+    `billing.cap.approaching` event to get notified before the cap is hit.
+
+    <CodeGroup>
+    ```bash cURL
+    curl -X POST https://platform.trylath.com/v1/billing/usage/get \
+      -H "Authorization: Bearer $LATH_SECRET_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{}'
+    ```
+
+    ```ts TypeScript
+    const { result } = await client.billing.usage.get();
+    console.log("Used so far:", `$${result.totalCents / 100}`);
+    ```
+    </CodeGroup>
+  </Step>
+</Steps>

@@ -1,0 +1,86 @@
+---
+title: "Lath: Unified Auth, Email and SMS on a Single Contact"
+sidebarTitle: "Introduction"
+description: "Learn what Lath is, how the unified contact model works, and why a single contact record eliminates sync code across auth, email, and SMS."
+---
+
+Most applications reach for three separate vendors when they need to authenticate users, send transactional emails, and deliver SMS messages. Each vendor holds a slice of the same person — an email address here, a phone number there, an opaque user ID somewhere else — and you write the glue code that keeps them in sync. Lath replaces that patchwork with a single platform: one API, one contact record, one consent system, and one spending cap that governs every channel.
+
+## The problem with three vendors
+
+When your identity provider, email vendor, and SMS carrier each maintain their own user model, you end up with a set of familiar problems:
+
+- **Duplicate records.** The same person appears as three separate objects with three separate IDs.
+- **Consent drift.** A user unsubscribes from email in your ESP, but that preference never makes it back to your auth provider's notification settings or your SMS carrier's opt-out list.
+- **Operational overhead.** Every new environment, every new team member, and every compliance audit requires you to configure and credential three systems instead of one.
+- **Glue code.** Webhooks, cron jobs, and import scripts that move data between vendors become load-bearing infrastructure — and the first thing to break.
+
+Lath eliminates these problems by design. Auth events, email sends, and SMS deliveries all write to and read from the same contact row.
+
+## The unified contact model
+
+A contact in Lath is a single row that holds everything you need to reach a person across every channel:
+
+| Field | Description |
+|---|---|
+| `contactId` | Stable identifier, scoped to your project |
+| `name` | Display name |
+| `email` | Email address, verified at signup or via a magic-link flow |
+| `phone` | E.164 phone number |
+| `locale` | BCP 47 locale tag (e.g. `en-US`, `fr-FR`) used to select template translations |
+| `properties` | Arbitrary key-value pairs you define — values can be strings, numbers, or booleans |
+| `consent` | Per-channel, per-topic consent state — tracked separately for `email` and `sms` |
+
+When a user signs up through Lath Auth, a contact record is created automatically. When you send an email or SMS, Lath looks up that same record to check per-channel, per-topic consent before the message ever leaves the platform.
+
+## The four policy gates
+
+Every message — whether it's an OTP code, a marketing email, or a transactional SMS — passes through four gates in order before Lath attempts delivery:
+
+<Steps>
+  <Step title="Suppression">
+    Lath checks its global suppression list (bounces, spam complaints, and carrier-level block lists). If the address or number is suppressed, the send is skipped and the response `status` is set to `suppressed`.
+  </Step>
+  <Step title="Consent">
+    Lath checks the contact's per-channel consent flags. A contact who has opted out of SMS will never receive an SMS, regardless of what your code instructs. Transactional and auth messages can be configured to bypass marketing consent — but never suppression.
+  </Step>
+  <Step title="Quiet hours">
+    For SMS, Lath enforces per-contact or project-level quiet hours. Messages that arrive during a quiet window are either queued for the next delivery window or dropped, depending on your configuration.
+  </Step>
+  <Step title="Spending cap">
+    Lath checks your project's monthly spending cap before each send. If the cap has been reached, the send is blocked and the response `status` is set to `suppressed`. This prevents runaway spend from loops or misconfigured automations.
+  </Step>
+</Steps>
+
+These gates run automatically on every operation. You don't need to implement them yourself.
+
+## Every surface, same operations
+
+Lath exposes the same 206 operations through five surfaces. Use whichever fits your workflow:
+
+| Surface | When to use |
+|---|---|
+| **REST API** | Any language, any environment. POST to `https://platform.trylath.com/v1/…` with a Bearer token. |
+| **TypeScript SDK** (`@trylath/sdk`) | Node.js and edge runtimes. Typed request and response objects, retries, and automatic idempotency-key generation. |
+| **MCP** | AI-assisted workflows and agentic integrations that speak the Model Context Protocol. |
+| **CLI** | Local development, CI/CD pipelines, and one-off administrative tasks. |
+| **Dashboard** | Visual management of contacts, templates, keys, and billing — no code required. |
+
+Every response, regardless of surface, has the shape `{ activityId, result }`. The `activityId` lets you look up the full event log for any operation.
+
+## Core concepts
+
+<CardGroup cols={2}>
+  <Card title="Contacts" icon="address-book" href="/concepts/contacts">
+    Understand the unified contact record — fields, lifecycle, merge behaviour, and the audience segment model.
+  </Card>
+  <Card title="Consent" icon="shield-check" href="/concepts/consent">
+    Learn how per-channel consent works, how to capture and update it, and how it interacts with suppression and quiet hours.
+  </Card>
+  <Card title="Environments" icon="flask" href="/concepts/environments">
+    Understand the difference between live and test environments, and how to isolate development traffic from production.
+  </Card>
+  <Card title="Idempotency" icon="rotate" href="/concepts/idempotency">
+    Use the `Idempotency-Key` header to safely retry mutating requests without duplicating sends or side effects.
+  </Card>
+</CardGroup>

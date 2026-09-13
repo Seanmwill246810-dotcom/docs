@@ -1,0 +1,213 @@
+---
+title: "Auth Session Endpoints: Get, List, and Revoke Sessions"
+sidebarTitle: "Sessions"
+description: "REST endpoints to inspect and revoke Lath auth sessions. Validate session tokens on incoming requests, list active devices, and revoke access when needed."
+---
+
+Lath sessions represent an authenticated relationship between a contact and a device. Every successful sign-in — whether via OTP code, magic link, password, passkey, or OAuth — produces a `sessionToken`. Use the session endpoints to validate that token on incoming requests, enumerate all active sessions for a contact, and revoke individual or all sessions when a user signs out or you detect suspicious activity.
+
+---
+
+## Get a session
+
+`POST /v1/auth/session/get`
+
+Validates a session token and returns the contact and device details associated with it. Call this endpoint on your server to identify who is making a request — treat it as your authentication middleware.
+
+### Request
+
+<ParamField body="sessionToken" type="string" required>
+  The session token returned by any sign-in endpoint.
+</ParamField>
+
+### Response
+
+<ResponseField name="contact" type="object">
+  <Expandable title="contact fields">
+    <ResponseField name="id" type="string">
+      The contact's Lath ID.
+    </ResponseField>
+    <ResponseField name="email" type="string">
+      The contact's email address.
+    </ResponseField>
+    <ResponseField name="phone" type="string">
+      The contact's phone number, if one is on record.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="device" type="string">
+  A human-readable description of the device or client that created the session, e.g. `"Chrome on macOS"`.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 timestamp of when the session was created.
+</ResponseField>
+
+<ResponseField name="lastSeenAt" type="string">
+  ISO 8601 timestamp of when the session was last used to authenticate a request.
+</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/auth/session/get \
+  -H "Authorization: Bearer lath_live_sk..." \
+  -H "Content-Type: application/json" \
+  -d '{ "sessionToken": "sess_abc123..." }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.auth.session.get({
+  sessionToken: "sess_abc123...",
+});
+
+console.log("Authenticated as:", result.contact.email);
+```
+
+</CodeGroup>
+
+---
+
+## List sessions for a contact
+
+`POST /v1/auth/session/list`
+
+Returns all active sessions for a contact. Use this to build a "devices" page in your settings UI so users can see where they are signed in.
+
+### Request
+
+<ParamField body="contactId" type="string" required>
+  The Lath contact ID whose sessions you want to list.
+</ParamField>
+
+### Response
+
+<ResponseField name="sessions" type="array">
+  An array of session objects, ordered by most recently active first.
+
+  <Expandable title="session fields">
+    <ResponseField name="id" type="string">
+      The unique session ID. Pass this to `/v1/auth/session/revoke` to end a specific session.
+    </ResponseField>
+    <ResponseField name="device" type="string">
+      Human-readable device description.
+    </ResponseField>
+    <ResponseField name="createdAt" type="string">
+      ISO 8601 timestamp of session creation.
+    </ResponseField>
+    <ResponseField name="lastSeenAt" type="string">
+      ISO 8601 timestamp of the most recent activity on this session.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/auth/session/list \
+  -H "Authorization: Bearer lath_live_sk..." \
+  -H "Content-Type: application/json" \
+  -d '{ "contactId": "cnt_xyz789" }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.auth.session.list({
+  contactId: "cnt_xyz789",
+});
+
+result.sessions.forEach((s) => {
+  console.log(`${s.device} — last seen ${s.lastSeenAt}`);
+});
+```
+
+</CodeGroup>
+
+---
+
+## Revoke a session
+
+`POST /v1/auth/session/revoke`
+
+Immediately invalidates a single session. Any subsequent request using that session's token will receive a `401 unauthenticated` response. Use this when a user signs out from a specific device.
+
+### Request
+
+<ParamField body="sessionId" type="string" required>
+  The ID of the session to revoke. Obtain this from `/v1/auth/session/list` or the `id` field from a sign-in response.
+</ParamField>
+
+### Response
+
+<ResponseField name="session" type="object">
+  <Expandable title="session fields">
+    <ResponseField name="id" type="string">
+      The ID of the revoked session.
+    </ResponseField>
+    <ResponseField name="revokedAt" type="string">
+      ISO 8601 timestamp of when the session was revoked.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/auth/session/revoke \
+  -H "Authorization: Bearer lath_live_sk..." \
+  -H "Content-Type: application/json" \
+  -d '{ "sessionId": "sess_def456" }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.auth.session.revoke({
+  sessionId: "sess_def456",
+});
+
+console.log("Revoked at:", result.session.revokedAt);
+```
+
+</CodeGroup>
+
+---
+
+## Revoke all sessions
+
+`POST /v1/auth/session/revoke-all`
+
+Invalidates every active session for a contact in a single call. Use this for account takeover recovery, a "sign out everywhere" feature, or when a contact's credentials are compromised.
+
+### Request
+
+<ParamField body="contactId" type="string" required>
+  The Lath contact ID whose sessions you want to revoke.
+</ParamField>
+
+### Response
+
+<ResponseField name="count" type="number">
+  The number of sessions that were revoked.
+</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/auth/session/revoke-all \
+  -H "Authorization: Bearer lath_live_sk..." \
+  -H "Content-Type: application/json" \
+  -d '{ "contactId": "cnt_xyz789" }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.auth.session.revokeAll({
+  contactId: "cnt_xyz789",
+});
+
+console.log(`Revoked ${result.count} session(s).`);
+```
+
+</CodeGroup>
+
+<Warning>
+  Revoking all sessions signs the contact out of every device immediately. If you call this while the contact is actively using your app, their next request will fail with `401`. Communicate this to the user before calling, or build a re-authentication prompt into your app.
+</Warning>

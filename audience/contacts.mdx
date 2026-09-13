@@ -1,0 +1,236 @@
+---
+title: "Contacts in the Lath Audience API: Create and Manage"
+sidebarTitle: "Contacts"
+description: "Create, update, and look up contacts via the Lath Audience API. Each record unifies email, phone, custom properties, and consent across all channels."
+---
+
+The Audience API is the CRUD layer for your contact list. Use it to create contacts when users sign up, update properties as they progress through your product, and look them up for messaging. Every contact record is a single source of truth that unifies identity, custom data, and consent across email and SMS — so any message you send, regardless of channel, reads from the same record.
+
+<Tip>
+  If you use Lath Auth, contacts are created automatically on a contact's first
+  sign-in. You only need `contact/create` for contacts that arrive from sources
+  outside of Auth — for example, a sign-up form, a CSV import, or a third-party
+  integration.
+</Tip>
+
+## Creating a contact
+
+`POST /v1/audience/contact/create`
+
+Create a new contact by providing at least one of `email` or `phone`. You can
+attach a display name, locale preference, and any number of custom properties at
+creation time. Properties you omit can always be added later via
+`contact/update`.
+
+<ParamField body="email" type="string">
+  The contact's email address. At least one of `email` or `phone` is required.
+</ParamField>
+
+<ParamField body="phone" type="string">
+  The contact's phone number in [E.164](https://en.wikipedia.org/wiki/E.164)
+  format (e.g. `+14155550123`). At least one of `email` or `phone` is required.
+</ParamField>
+
+<ParamField body="name" type="string">
+  The contact's display name. Used in templates via the `{{contact.name}}`
+  variable.
+</ParamField>
+
+<ParamField body="locale" type="string">
+  A [BCP 47](https://www.rfc-editor.org/rfc/bcp/bcp47.txt) locale code such as
+  `en-US` or `fr-FR`. Lath uses this value to select the matching translation
+  when sending a localised template.
+</ParamField>
+
+<ParamField body="properties" type="object">
+  Arbitrary key/value pairs you want to store on the contact. Values may be
+  `string`, `number`, or `boolean`. Use dot-notation keys to model nested
+  concepts — for example `"properties.plan": "pro"`.
+</ParamField>
+
+<CodeGroup>
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/contact/create \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: contact-ada-lovelace-001" \
+  -d '{
+    "email": "ada@example.com",
+    "phone": "+14155550123",
+    "name": "Ada Lovelace",
+    "locale": "en-US",
+    "properties": {
+      "plan": "pro",
+      "signupSource": "website",
+      "trialEndsAt": "2025-09-01"
+    }
+  }'
+```
+
+```typescript TypeScript
+import { Lath } from "@trylath/sdk";
+
+const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+const { result } = await lath.audience.contact.create({
+  email: "ada@example.com",
+  phone: "+14155550123",
+  name: "Ada Lovelace",
+  locale: "en-US",
+  properties: {
+    plan: "pro",
+    signupSource: "website",
+    trialEndsAt: "2025-09-01",
+  },
+});
+
+console.log(result.contactId); // e.g. "con_01j..."
+```
+</CodeGroup>
+
+The response envelope contains `activityId` and `result`. The `result` object
+includes the newly created `contactId`, which you should persist in your own
+database to reference this contact in future API calls.
+
+## Looking up a contact
+
+`POST /v1/audience/contact/get`
+
+Fetch a single contact by any of their identifiers. You can query by
+`contactId`, `email`, or `phone` — pass whichever you have available.
+
+<CodeGroup>
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/contact/get \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "ada@example.com" }'
+```
+
+```typescript TypeScript
+const { result } = await lath.audience.contact.get({
+  email: "ada@example.com",
+});
+
+console.log(result.contact);
+```
+</CodeGroup>
+
+## Updating a contact
+
+`POST /v1/audience/contact/update`
+
+Update one or more fields on an existing contact. Pass only the fields you want
+to change — omitted fields remain exactly as they are. To clear a nullable field
+entirely, pass `null` as its value.
+
+<CodeGroup>
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/contact/update \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contactId": "con_01j...",
+    "properties": {
+      "plan": "enterprise"
+    }
+  }'
+```
+
+```typescript TypeScript
+await lath.audience.contact.update({
+  contactId: "con_01j...",
+  properties: {
+    plan: "enterprise",
+  },
+});
+```
+</CodeGroup>
+
+<Note>
+  `properties` are **merged**, not replaced. If the contact already has
+  `properties.signupSource`, updating `properties.plan` leaves `signupSource`
+  untouched. To remove a specific property key, set its value to `null`.
+</Note>
+
+## Listing contacts
+
+`POST /v1/audience/contact/list`
+
+Retrieve a paginated list of all contacts in your project. The response includes
+a `cursor` value you can pass on the next request to fetch the following page.
+
+<ParamField body="limit" type="number">
+  Maximum number of contacts to return per page. Defaults to `50`, maximum
+  `200`.
+</ParamField>
+
+<ParamField body="cursor" type="string">
+  Pagination cursor returned by the previous `contact/list` response. Omit on
+  the first request.
+</ParamField>
+
+<CodeGroup>
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/contact/list \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "limit": 100, "cursor": "cur_01j..." }'
+```
+
+```typescript TypeScript
+const { result } = await lath.audience.contact.list({
+  limit: 100,
+  cursor: "cur_01j...",
+});
+
+for (const contact of result.contacts) {
+  console.log(contact.contactId, contact.email);
+}
+
+// Fetch the next page
+if (result.nextCursor) {
+  const nextPage = await lath.audience.contact.list({
+    limit: 100,
+    cursor: result.nextCursor,
+  });
+}
+```
+</CodeGroup>
+
+## Merging duplicate contacts
+
+`POST /v1/audience/contact/merge`
+
+When a contact ends up with two records — for example, they signed up with a
+phone number before you had their email — merge them into a single canonical
+record. Specify a `sourceContactId` (the record to archive) and a
+`targetContactId` (the record to keep). The target retains all activity history,
+consent settings, and properties from both records; the source is archived and
+can no longer be used.
+
+<CodeGroup>
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/contact/merge \
+  -H "Authorization: Bearer lath_live_sk_..." \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: merge-ada-dupes-001" \
+  -d '{
+    "sourceContactId": "con_old...",
+    "targetContactId": "con_new..."
+  }'
+```
+
+```typescript TypeScript
+await lath.audience.contact.merge({
+  sourceContactId: "con_old...",
+  targetContactId: "con_new...",
+});
+```
+</CodeGroup>
+
+<Warning>
+  Merges are irreversible. The source contact is permanently archived after a
+  merge. Double-check both IDs before sending this request, and use an
+  `Idempotency-Key` so a retry cannot trigger a second merge.
+</Warning>

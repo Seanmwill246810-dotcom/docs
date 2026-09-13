@@ -1,0 +1,159 @@
+---
+title: "Send Broadcast Emails to Audience Segments in Lath"
+sidebarTitle: "Broadcasts"
+description: "Lath broadcasts deliver an email to every contact in a segment who has consented to the topic. Create, review, and schedule sends before committing."
+---
+
+A broadcast sends one email to all contacts in a segment who have consented to the broadcast's topic on the email channel. Lath handles filtering automatically — at send time every recipient passes through the same suppression, consent, quiet hours, and spending cap checks as a single transactional send. Contacts who have unsubscribed, bounced, lack consent, or fall outside the delivery window are silently skipped. You never need to manually filter your list before sending.
+
+## Create a broadcast
+
+`POST /v1/email/broadcast/create` defines the broadcast configuration and returns a `broadcastId`. Creating a broadcast does not send anything — it produces a draft you can review and adjust before committing.
+
+<ParamField body="name" type="string" required>
+  A descriptive internal name for the broadcast (for example, `"September Product Newsletter"`). Shown in the dashboard and activity log.
+</ParamField>
+
+<ParamField body="segment" type="string" required>
+  The name or ID of the audience segment to send to. Every contact in the segment is evaluated for consent and suppression at send time.
+</ParamField>
+
+<ParamField body="template" type="string" required>
+  The slug name of a published template. The same template is rendered for each recipient, with per-contact variables resolved where applicable.
+</ParamField>
+
+<ParamField body="topic" type="string" required>
+  The consent topic for this broadcast (for example, `"newsletter"` or `"marketing"`). Only contacts who have granted email consent for this topic receive the message.
+</ParamField>
+
+<ParamField body="from" type="string" required>
+  The sender address on a verified sending domain (for example, `"news@yourcompany.com"`).
+</ParamField>
+
+<ParamField body="subject" type="string">
+  Overrides the subject line defined in the template. Use this to personalise broadcast subjects (for example, `"Your September update is here"`) without creating a new template.
+</ParamField>
+
+<ParamField body="variables" type="object">
+  Global key/value pairs applied to every recipient's render. Use these for content that's the same for all contacts, like a campaign name or a promo code. Contact-level `{{ contact.property }}` references are resolved separately.
+</ParamField>
+
+## Send or schedule a broadcast
+
+`POST /v1/email/broadcast/send` moves the broadcast from `draft` to either `sending` (immediate) or `scheduled` (future). Pass the `broadcastId` returned from `broadcast/create`.
+
+<ParamField body="broadcastId" type="string" required>
+  The ID of the draft broadcast to send.
+</ParamField>
+
+<ParamField body="sendAt" type="string">
+  An ISO 8601 datetime string. When provided, Lath schedules the broadcast for that time. Omit to begin delivery immediately.
+</ParamField>
+
+## Check broadcast status
+
+`POST /v1/email/broadcast/get` returns the current state of a broadcast.
+
+```bash
+curl -X POST https://platform.trylath.com/v1/email/broadcast/get \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "broadcastId": "brd_01hx9z3k2p4qr5st6uv7wx8yz" }'
+```
+
+| `status` | What it means |
+|---|---|
+| `draft` | Created but not yet submitted for sending. |
+| `scheduled` | Queued to send at a future `sendAt` time. |
+| `sending` | Actively delivering to recipients. |
+| `sent` | All qualifying contacts have been processed. |
+
+## Cancel a broadcast
+
+`POST /v1/email/broadcast/cancel` cancels a broadcast that is in `scheduled` status. You cannot cancel a broadcast that has already entered `sending`.
+
+```bash
+curl -X POST https://platform.trylath.com/v1/email/broadcast/cancel \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "broadcastId": "brd_01hx9z3k2p4qr5st6uv7wx8yz" }'
+```
+
+## End-to-end workflow
+
+<Steps>
+  <Step title="Create the broadcast">
+    Call `POST /v1/email/broadcast/create` with your segment, template, topic, and sender address. Lath returns a `broadcastId` and a `draft` status.
+  </Step>
+  <Step title="Review estimated reach">
+    Open the broadcast in the Lath dashboard to see the estimated recipient count — the number of contacts in the segment who currently have email consent for the topic. Use this to sanity-check before sending.
+  </Step>
+  <Step title="Send or schedule">
+    Call `POST /v1/email/broadcast/send` to begin delivery immediately, or pass a `sendAt` datetime to schedule it. For large segments, consider scheduling during off-peak hours to avoid inbox congestion.
+  </Step>
+</Steps>
+
+## Full example
+
+<CodeGroup>
+```bash cURL
+# Step 1: Create the broadcast
+curl -X POST https://platform.trylath.com/v1/email/broadcast/create \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "September Product Newsletter",
+    "segment": "active-subscribers",
+    "template": "monthly-newsletter",
+    "topic": "newsletter",
+    "from": "news@yourcompany.com",
+    "subject": "What'\''s new at Acme in September",
+    "variables": { "month": "September", "heroImageUrl": "https://cdn.yourcompany.com/sep.jpg" }
+  }'
+
+# Step 2: Schedule the broadcast
+curl -X POST https://platform.trylath.com/v1/email/broadcast/send \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "broadcastId": "brd_01hx9z3k2p4qr5st6uv7wx8yz",
+    "sendAt": "2025-09-02T10:00:00Z"
+  }'
+```
+
+```typescript TypeScript SDK
+import { Lath } from "@trylath/sdk";
+
+const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+// Create the broadcast
+const { result: broadcast } = await lath.email.broadcast.create({
+  name: "September Product Newsletter",
+  segment: "active-subscribers",
+  template: "monthly-newsletter",
+  topic: "newsletter",
+  from: "news@yourcompany.com",
+  subject: "What's new at Acme in September",
+  variables: {
+    month: "September",
+    heroImageUrl: "https://cdn.yourcompany.com/sep.jpg",
+  },
+});
+
+// Schedule it
+await lath.email.broadcast.send({
+  broadcastId: broadcast.broadcastId,
+  sendAt: "2025-09-02T10:00:00Z",
+});
+
+console.log("Broadcast scheduled:", broadcast.broadcastId);
+```
+</CodeGroup>
+
+<Note>
+  Each contact's consent is checked at send time, not at broadcast creation time. A contact who unsubscribes between when you create the broadcast and when it actually delivers will not receive the message. You never need to re-filter your segment — Lath handles this automatically.
+</Note>
+
+<Tip>
+  Use `lath_test_sk…` keys to create and send test broadcasts. Test-mode broadcasts run the same consent and suppression checks but deliver only to your sandbox inbox, so you can validate your template and segment logic without reaching real contacts.
+</Tip>

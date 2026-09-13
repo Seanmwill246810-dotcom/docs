@@ -1,0 +1,86 @@
+---
+title: "Lath Email: Transactional, Templates, and Broadcasts"
+sidebarTitle: "Overview"
+description: "Send transactional email, manage templates, broadcast to segments, and build automations — all with shared consent and spending cap enforcement."
+---
+
+Lath Email gives you 38 operations covering every stage of email delivery: send a single transactional message to one recipient, manage reusable templates with per-locale translations, broadcast to entire audience segments, and build multi-step automations with conditional branching and delays. Because Lath Email shares a contact record with Auth and SMS, every send automatically inherits consent, suppression, and budget enforcement — no custom middleware required.
+
+## How every send is processed
+
+Before Lath delivers any email, it runs four checks in order:
+
+1. **Suppression list** — the recipient's address is checked against global bounces and platform-level blocks.
+2. **Consent check** — the `topic` field on your request is matched against the contact's per-channel consent. If the contact hasn't opted in to that topic on the email channel, the send returns `status: "suppressed"` rather than an error.
+3. **Quiet hours** — if your account has quiet hours configured, sends that fall outside the allowed delivery window are held until the window reopens.
+4. **Spending cap** — your account's configured email spending cap is evaluated. If the cap is reached, the send is suppressed with `reason: "spending_cap_reached"`.
+
+A suppressed send is a successful API call. It means a policy check intentionally blocked delivery — inspect the `blocked` object in the response to understand why and how to resolve it.
+
+## What's in Lath Email
+
+<CardGroup cols={2}>
+  <Card title="Send Email" icon="paper-plane" href="/email/send">
+    POST to `/v1/email/send` to deliver a single email to one recipient using a published template. Supports scheduling, variable injection, and subject overrides.
+  </Card>
+  <Card title="Templates" icon="file-code" href="/email/templates">
+    Create reusable email designs with variable substitution and multi-locale support. Templates follow a draft/publish workflow — unpublished changes never affect live sends.
+  </Card>
+  <Card title="Automations" icon="workflow" href="/email/automations">
+    Build sequences of send, wait, branch, and property-set steps that run per contact. Trigger them from your app whenever something meaningful happens.
+  </Card>
+  <Card title="Broadcasts" icon="megaphone" href="/email/broadcasts">
+    Deliver one email to every consented contact in a segment. Consent is checked at send time, so lapsed opt-ins are automatically skipped.
+  </Card>
+</CardGroup>
+
+## Quick start
+
+The example below sends a transactional welcome email. The `topic` field is `"transactional"` — Lath checks that the contact has granted email consent for that topic before delivering.
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://platform.trylath.com/v1/email/send \
+  -H "Authorization: Bearer $LATH_SECRET_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "to": "user@example.com",
+    "template": "welcome",
+    "topic": "transactional",
+    "from": "hello@yourcompany.com",
+    "variables": { "firstName": "Avery" }
+  }'
+```
+
+```typescript TypeScript SDK
+import { Lath } from "@trylath/sdk";
+
+const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+
+const { result } = await lath.email.send({
+  to: "user@example.com",
+  template: "welcome",
+  topic: "transactional",
+  from: "hello@yourcompany.com",
+  variables: { firstName: "Avery" },
+});
+
+console.log(result.status); // "queued" or "suppressed"
+```
+</CodeGroup>
+
+**Response**
+
+```json
+{
+  "activityId": "act_01hx9z3k2p4qr5st6uv7wx8yz",
+  "result": {
+    "messageId": "msg_01hx9z3k2p4qr5st6uv7wx8yz",
+    "status": "queued"
+  }
+}
+```
+
+<Tip>
+  Use `lath_test_sk…` keys during development. Test-mode sends never leave Lath's infrastructure — they go through the same policy checks but are delivered only to your sandbox inbox.
+</Tip>

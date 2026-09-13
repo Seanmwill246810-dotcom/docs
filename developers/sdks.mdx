@@ -1,0 +1,221 @@
+---
+title: "Lath SDKs: TypeScript, Node, React, and React Native"
+sidebarTitle: "SDKs"
+description: "Use Lath's typed TypeScript/Node SDK, drop-in React sign-in components, or the React Native package. Every SDK method maps directly to the REST API."
+---
+
+Lath ships first-party SDKs that wrap the REST API with typed inputs and outputs. Every SDK method maps one-to-one to a REST endpoint — same operation name, same fields, same response shape. If you find something in the REST API reference you can call it from the SDK immediately, and vice versa. The SDK handles authentication, JSON serialization, idempotency key generation, and error normalization for you.
+
+## TypeScript / Node SDK (`@trylath/sdk`)
+
+Use this SDK in any Node.js server, edge function, or serverless handler. It is fully typed — every method's inputs and outputs match the REST API exactly, so IntelliSense gives you the same field names and shapes you'd see in the API reference.
+
+### Installation
+
+```bash
+npm install @trylath/sdk
+```
+
+### Initialize the client
+
+```typescript
+import { Lath } from '@trylath/sdk';
+
+const lath = new Lath({ secretKey: process.env.LATH_SECRET_KEY });
+```
+
+Pass your secret key via an environment variable. Never hardcode credentials.
+
+### Example operations
+
+<CodeGroup>
+
+```typescript Send email
+const { result } = await lath.email.send({
+  to: 'user@example.com',
+  template: 'welcome',
+  topic: 'transactional',
+  from: 'hello@yourcompany.com',
+  variables: { firstName: 'Avery' },
+});
+
+console.log(result.messageId);
+```
+
+```typescript Create a contact
+const { result } = await lath.audience.contact.create({
+  email: 'user@example.com',
+  name: 'Avery Chen',
+  properties: { plan: 'pro' },
+});
+
+console.log(result.contact.id); // cnt_...
+```
+
+```typescript Grant consent
+await lath.audience.consent.grant({
+  contactId: 'cnt_...',
+  topic: 'product-news',
+  channel: 'email',
+  source: 'signup-form',
+});
+```
+
+```typescript Send SMS
+const { result } = await lath.sms.send({
+  to: '+14155550100',
+  template: 'otp-code',
+  variables: { code: '847203' },
+});
+```
+
+</CodeGroup>
+
+### Response shape
+
+Every method returns a Promise that resolves to `{ activityId, result }`. The `activityId` identifies this specific API call — include it when contacting Lath support about a specific request.
+
+```typescript
+const { activityId, result } = await lath.email.send({ ... });
+```
+
+### Error handling
+
+The SDK throws a `LathError` when the API returns a non-2xx response. It includes the HTTP status, a machine-readable `code`, and a human-readable `message`.
+
+```typescript
+import { LathError } from '@trylath/sdk';
+
+try {
+  await lath.email.send({ ... });
+} catch (err) {
+  if (err instanceof LathError) {
+    console.error(err.code);    // e.g. "contact_not_found"
+    console.error(err.message); // human-readable description
+    console.error(err.status);  // HTTP status code
+  }
+}
+```
+
+---
+
+## React SDK (`@trylath/react`)
+
+Use this package in any React application — Next.js, Remix, Vite, CRA, or similar. It provides drop-in UI components for auth flows and inherits your project's theme automatically via the Lath dashboard theme settings.
+
+### Installation
+
+```bash
+npm install @trylath/react
+```
+
+### Drop-in sign-in component
+
+The `SignIn` component handles the full authentication surface: email verification codes, magic links, passwords, passkeys, and all configured OAuth providers (Google, Microsoft, GitHub). Your users see only the methods you have enabled in the dashboard.
+
+```tsx
+import { SignIn } from '@trylath/react';
+
+export function LoginPage() {
+  return (
+    <SignIn
+      publishableKey={process.env.NEXT_PUBLIC_LATH_PK}
+      onSuccess={(session) => {
+        // session.token     — bearer token for subsequent API calls
+        // session.contactId — unified contact record ID
+        router.push('/dashboard');
+      }}
+    />
+  );
+}
+```
+
+<Note>
+  Use your **publishable key** (`lath_live_pk…`) in all browser code. A publishable key is safe to embed in client-side bundles. Never use a secret key in a React component.
+</Note>
+
+### `LathProvider`
+
+Wrap your application in `LathProvider` to give all child components access to the current session without prop drilling.
+
+```tsx
+import { LathProvider } from '@trylath/react';
+
+export default function App({ children }) {
+  return (
+    <LathProvider publishableKey={process.env.NEXT_PUBLIC_LATH_PK}>
+      {children}
+    </LathProvider>
+  );
+}
+```
+
+### `useSession` hook
+
+Read and react to the current session anywhere inside the provider tree.
+
+```tsx
+import { useSession } from '@trylath/react';
+
+export function Header() {
+  const { session, signOut } = useSession();
+
+  if (!session) return <a href="/login">Sign in</a>;
+
+  return (
+    <div>
+      <span>Signed in as {session.contactId}</span>
+      <button onClick={signOut}>Sign out</button>
+    </div>
+  );
+}
+```
+
+---
+
+## React Native SDK (`@trylath/react-native`)
+
+The React Native package provides the same components and hooks as `@trylath/react`, adapted for mobile. Native biometric passkey support uses the device's platform authenticator (Face ID, Touch ID, or Android fingerprint).
+
+### Installation
+
+```bash
+npm install @trylath/react-native
+```
+
+### Usage
+
+```tsx
+import { SignIn, LathProvider } from '@trylath/react-native';
+
+export default function App() {
+  return (
+    <LathProvider publishableKey={process.env.LATH_PUBLISHABLE_KEY}>
+      <SignIn
+        onSuccess={(session) => navigation.replace('Home')}
+      />
+    </LathProvider>
+  );
+}
+```
+
+The `SignIn` component on React Native respects the same enabled auth methods as your web app. Passkey prompts use the native biometric sheet automatically.
+
+---
+
+## SDK / REST equivalence reference
+
+Every SDK namespace corresponds directly to a REST path prefix:
+
+| SDK namespace | REST prefix |
+|---|---|
+| `lath.email` | `/v1/email` |
+| `lath.sms` | `/v1/sms` |
+| `lath.audience.contact` | `/v1/audience/contact` |
+| `lath.audience.consent` | `/v1/audience/consent` |
+| `lath.auth` | `/v1/auth` |
+| `lath.developers.key` | `/v1/developers/key` |
+| `lath.developers.webhook` | `/v1/developers/webhook` |
+| `lath.billing` | `/v1/billing` |
+
+If you're migrating from raw `fetch` calls to the SDK, replace the path segments with the equivalent namespace chain and the SDK picks up your existing field names unchanged.

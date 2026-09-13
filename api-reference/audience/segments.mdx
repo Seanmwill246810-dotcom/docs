@@ -1,0 +1,308 @@
+---
+title: "Audience Segment Endpoints: Create and Query Segments"
+sidebarTitle: "Segments"
+description: "REST endpoints to create dynamic contact segments, count members, and use segments as broadcast targets. Membership is evaluated live on your contacts."
+---
+
+A segment is a saved filter that defines a dynamic subset of your contacts. Rather than maintaining a static list, a segment describes rules (e.g. "all contacts where `properties.plan` equals `pro` and `locale` equals `en`") and Lath evaluates those rules in real time. Segments are used as broadcast targets, automation entry conditions, and in the dashboard for audience analysis. Because segments are evaluated dynamically, the member count changes automatically as contacts are created or updated.
+
+## Filter schema
+
+Every segment is built from a filter object. Filters support single conditions and logical groups.
+
+### Single condition
+
+```json
+{ "field": "properties.plan", "op": "eq", "value": "pro" }
+```
+
+Supported `op` values: `eq`, `neq`, `gt`, `lt`, `contains`, `exists`, `not_exists`.
+
+### Logical group
+
+```json
+{
+  "and": [
+    { "field": "properties.plan", "op": "eq", "value": "pro" },
+    { "field": "locale", "op": "eq", "value": "en" }
+  ]
+}
+```
+
+Use `and` or `or` to compose multiple conditions. Groups can be nested.
+
+---
+
+## POST /v1/audience/segment/create
+
+Create a new saved segment.
+
+### Request
+
+<ParamField body="name" type="string" required>
+  Human-readable name for the segment (e.g. `"Pro plan — English"`). Visible in the dashboard and referenced in broadcast and automation configurations.
+</ParamField>
+
+<ParamField body="filter" type="object" required>
+  Filter definition using the schema described above. This determines which contacts belong to the segment.
+</ParamField>
+
+### Response
+
+<ResponseField name="segment.id" type="string">
+  UUID assigned to this segment.
+</ResponseField>
+
+<ResponseField name="segment.name" type="string">
+  The segment name as stored.
+</ResponseField>
+
+<ResponseField name="segment.filter" type="object">
+  The filter definition as stored.
+</ResponseField>
+
+<ResponseField name="segment.createdAt" type="string">
+  ISO 8601 timestamp of when the segment was created.
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/segment/create \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Pro plan — English",
+    "filter": {
+      "and": [
+        { "field": "properties.plan", "op": "eq", "value": "pro" },
+        { "field": "locale", "op": "eq", "value": "en" }
+      ]
+    }
+  }'
+```
+
+```typescript TypeScript SDK
+import { LathClient } from "@trylath/sdk";
+
+const lath = new LathClient({ apiKey: process.env.LATH_SECRET_KEY });
+
+const { result } = await lath.audience.segments.create({
+  name: "Pro plan — English",
+  filter: {
+    and: [
+      { field: "properties.plan", op: "eq", value: "pro" },
+      { field: "locale", op: "eq", value: "en" },
+    ],
+  },
+});
+
+console.log("Segment ID:", result.segment.id);
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/audience/segment/count
+
+Get a live count of contacts currently matching a segment's filter. Because segments are dynamic, the count reflects the current state of your contact database at the moment you call this endpoint.
+
+### Request
+
+<ParamField body="segmentId" type="string" required>
+  UUID of the segment to count.
+</ParamField>
+
+### Response
+
+<ResponseField name="count" type="integer">
+  Number of contacts currently matching the segment filter.
+</ResponseField>
+
+<ResponseField name="evaluatedAt" type="string">
+  ISO 8601 timestamp of when the count was computed.
+</ResponseField>
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/segment/count \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{ "segmentId": "seg_01hx9z3k2q7p4m8w" }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.audience.segments.count({
+  segmentId: "seg_01hx9z3k2q7p4m8w",
+});
+
+console.log(`Segment has ${result.count} contacts as of ${result.evaluatedAt}`);
+```
+
+</CodeGroup>
+
+<Tip>
+  Call `/v1/audience/segment/count` before creating a broadcast to verify your estimated recipient count. The broadcast creation endpoint also returns `estimatedRecipients`, which uses the same evaluation.
+</Tip>
+
+---
+
+## POST /v1/audience/segment/get
+
+Retrieve the full definition and metadata for a segment.
+
+### Request
+
+<ParamField body="segmentId" type="string" required>
+  UUID of the segment to retrieve.
+</ParamField>
+
+### Response
+
+Returns the full segment object with `id`, `name`, `filter`, `createdAt`, and `updatedAt`.
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/segment/get \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{ "segmentId": "seg_01hx9z3k2q7p4m8w" }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.audience.segments.get({
+  segmentId: "seg_01hx9z3k2q7p4m8w",
+});
+
+console.log("Filter:", JSON.stringify(result.segment.filter, null, 2));
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/audience/segment/list
+
+List all segments in your project.
+
+### Request
+
+This endpoint takes no request body.
+
+### Response
+
+Returns `{ segments: [{ id, name, filter, createdAt, updatedAt }] }`.
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/segment/list \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.audience.segments.list();
+
+for (const seg of result.segments) {
+  console.log(`${seg.name} (${seg.id})`);
+}
+```
+
+</CodeGroup>
+
+---
+
+## POST /v1/audience/segment/delete
+
+Delete a segment. Broadcasts that have already been sent using this segment are not affected. Scheduled broadcasts referencing this segment will fail to send after deletion.
+
+### Request
+
+<ParamField body="segmentId" type="string" required>
+  UUID of the segment to delete.
+</ParamField>
+
+### Response
+
+Returns `{ deleted: true, segmentId }`.
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/audience/segment/delete \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -d '{ "segmentId": "seg_01hx9z3k2q7p4m8w" }'
+```
+
+```typescript TypeScript SDK
+const { result } = await lath.audience.segments.delete({
+  segmentId: "seg_01hx9z3k2q7p4m8w",
+});
+
+console.log("Deleted:", result.deleted);
+```
+
+</CodeGroup>
+
+<Warning>
+  Deleting a segment that is referenced by a pending or scheduled broadcast will cause that broadcast to fail when it attempts to run. Cancel any dependent broadcasts before deleting the segment.
+</Warning>
+
+---
+
+## Filterable fields
+
+<CardGroup cols={2}>
+  <Card title="Core fields">
+    `email`, `phone`, `name`, `locale`, `createdAt`
+  </Card>
+  <Card title="Properties">
+    Any key under `properties.*` — for example `properties.plan`, `properties.trialEndsAt`
+  </Card>
+</CardGroup>
+
+### Example filters
+
+<Accordion title="Contacts who signed up in the last 30 days">
+
+```json
+{
+  "field": "createdAt",
+  "op": "gt",
+  "value": "2025-08-01T00:00:00Z"
+}
+```
+
+</Accordion>
+
+<Accordion title="Pro contacts without a phone number">
+
+```json
+{
+  "and": [
+    { "field": "properties.plan", "op": "eq", "value": "pro" },
+    { "field": "phone", "op": "not_exists" }
+  ]
+}
+```
+
+</Accordion>
+
+<Accordion title="Any contact on a paid plan (pro or enterprise)">
+
+```json
+{
+  "or": [
+    { "field": "properties.plan", "op": "eq", "value": "pro" },
+    { "field": "properties.plan", "op": "eq", "value": "enterprise" }
+  ]
+}
+```
+
+</Accordion>

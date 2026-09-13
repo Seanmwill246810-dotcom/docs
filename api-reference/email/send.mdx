@@ -1,0 +1,181 @@
+---
+title: "Send a Transactional Email with the Lath Email API"
+sidebarTitle: "Send Email"
+description: "Send a single email to one recipient using a published template. Consent, suppression, and spending cap are checked before the message is queued."
+---
+
+Sending a transactional email in Lath is a single POST request. Before queuing the message, the platform checks that the recipient has granted consent for the given topic, that their address is not suppressed, and that your project has not exceeded its spending cap. If any check fails, the message is not sent and the response tells you exactly why.
+
+## Request
+
+<ParamField body="to" type="string" required>
+  The recipient's email address. Must be a valid RFC 5321 address.
+</ParamField>
+
+<ParamField body="template" type="string" required>
+  The name of a published email template in your project. Drafts cannot be used for sending.
+</ParamField>
+
+<ParamField body="topic" type="string" required>
+  The consent topic string that gates delivery (e.g. `"transactional"`, `"marketing"`). The recipient must have an active grant for this topic and the `email` channel.
+</ParamField>
+
+<ParamField body="from" type="string" required>
+  A verified sender address in your project (e.g. `"hello@acme.com"`). Must pass email format validation.
+</ParamField>
+
+<ParamField body="subject" type="string">
+  Overrides the subject line defined in the template. Maximum 300 characters.
+</ParamField>
+
+<ParamField body="variables" type="object">
+  Key-value pairs injected into the template at render time. Values must be strings, numbers, or booleans.
+
+  ```json
+  { "firstName": "Ada", "invoiceTotal": 49.99, "isPro": true }
+  ```
+</ParamField>
+
+<ParamField body="sendAfter" type="string">
+  An ISO 8601 datetime that schedules the message for future delivery (e.g. `"2025-09-01T09:00:00Z"`). Omit to send immediately.
+</ParamField>
+
+## Response
+
+Every response envelope has the shape `{ activityId, result }`. The fields below live inside `result`.
+
+<ResponseField name="messageId" type="string">
+  UUID assigned to this queued message. Use it to look up delivery events in the webhook log.
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  `queued` — the message was accepted and is being delivered.  
+  `suppressed` — the message was blocked; see the `blocked` field for details.
+</ResponseField>
+
+<ResponseField name="to" type="string">
+  The recipient address as normalised by the platform.
+</ResponseField>
+
+<ResponseField name="template" type="string">
+  The template name that was used.
+</ResponseField>
+
+<ResponseField name="templateVersion" type="integer">
+  The published version number of the template at send time. Pinned so that future template edits do not alter already-queued messages.
+</ResponseField>
+
+<ResponseField name="sendAfter" type="string | null">
+  The scheduled delivery time you passed in, or `null` for immediate sends.
+</ResponseField>
+
+<ResponseField name="blocked" type="object | null">
+  Present only when `status` is `suppressed`. Contains two fields:
+
+  <Expandable title="blocked fields">
+    <ResponseField name="blocked.reason" type="string">
+      Human-readable explanation of why the message was blocked (e.g. `"No consent for topic 'marketing' on channel 'email'"`, `"Address is on global suppression list"`).
+    </ResponseField>
+
+    <ResponseField name="blocked.fix" type="string">
+      Suggested remediation step (e.g. `"Call /v1/audience/consent/grant before sending"`).
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://platform.trylath.com/v1/email/send \
+  -H "Authorization: Bearer lath_live_sk_••••" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: send-invoice-42-to-ada" \
+  -d '{
+    "to": "ada@example.com",
+    "template": "invoice-paid",
+    "topic": "transactional",
+    "from": "billing@acme.com",
+    "subject": "Your invoice is ready",
+    "variables": {
+      "firstName": "Ada",
+      "invoiceTotal": "49.99",
+      "invoiceNumber": "INV-0042"
+    }
+  }'
+```
+
+```typescript TypeScript SDK
+import { LathClient } from "@trylath/sdk";
+
+const lath = new LathClient({ apiKey: process.env.LATH_SECRET_KEY });
+
+const { result } = await lath.email.send({
+  to: "ada@example.com",
+  template: "invoice-paid",
+  topic: "transactional",
+  from: "billing@acme.com",
+  subject: "Your invoice is ready",
+  variables: {
+    firstName: "Ada",
+    invoiceTotal: "49.99",
+    invoiceNumber: "INV-0042",
+  },
+});
+
+if (result.status === "suppressed") {
+  console.warn("Message blocked:", result.blocked?.reason);
+  console.info("Fix:", result.blocked?.fix);
+} else {
+  console.log("Queued with ID:", result.messageId);
+}
+```
+
+</CodeGroup>
+
+### Suppressed response example
+
+```json
+{
+  "activityId": "act_01hx9z3k2q7p4m8w",
+  "result": {
+    "messageId": "msg_01hx9z3k2q7p4m8w",
+    "status": "suppressed",
+    "to": "ada@example.com",
+    "template": "invoice-paid",
+    "templateVersion": 3,
+    "sendAfter": null,
+    "blocked": {
+      "reason": "No consent for topic 'transactional' on channel 'email'",
+      "fix": "Call /v1/audience/consent/grant before sending"
+    }
+  }
+}
+```
+
+## Scheduling a future send
+
+Pass `sendAfter` to defer delivery. The platform queues the message immediately and holds it until the specified time.
+
+```json
+{
+  "to": "ada@example.com",
+  "template": "weekly-digest",
+  "topic": "marketing",
+  "from": "news@acme.com",
+  "sendAfter": "2025-09-01T09:00:00Z"
+}
+```
+
+<Note>
+  `sendAfter` must be in the future at request time. If the timestamp has already passed, the platform rejects the request with a `400` error.
+</Note>
+
+## Idempotency
+
+Pass an `Idempotency-Key` header on every send request. If you retry the same key within 24 hours, Lath returns the original response without queuing a duplicate message.
+
+<Tip>
+  A good key is a hash of the logical operation — for example `send-invoice-{invoiceId}-to-{contactId}`. Avoid reusing keys across different recipients or templates.
+</Tip>

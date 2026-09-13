@@ -1,0 +1,127 @@
+---
+title: "Lath API Reference: REST Endpoints and Conventions"
+sidebarTitle: "Overview"
+description: "The Lath REST API uses POST for every operation, returns { activityId, result } on success, and supports idempotency keys on all mutating calls."
+---
+
+The Lath API is a single-surface REST API where every operation is a POST request. Whether you're sending a sign-in code, triggering a transactional email, or creating an organization, the request shape, response envelope, and error format are identical across all 206 operations. The same capabilities are also available via MCP, the `@trylath/sdk` TypeScript SDK, the Lath CLI, and the dashboard — so you can mix and match access patterns as your stack requires.
+
+## Base URL
+
+All requests go to the same base URL:
+
+```text
+https://platform.trylath.com
+```
+
+## Authentication
+
+Pass your API key as a Bearer token in the `Authorization` header on every request. Lath issues two key types per environment:
+
+| Key prefix | Type | Use |
+|---|---|---|
+| `lath_live_sk…` | Server, live | Production server-side calls |
+| `lath_test_sk…` | Server, test | Development server-side calls |
+| `lath_live_pk…` | Browser, live | Production client-side calls |
+| `lath_test_pk…` | Browser, test | Development client-side calls |
+
+```http
+Authorization: Bearer lath_live_sk...
+```
+
+<Warning>
+  Server keys (`sk`) have full API access. Never expose them in client-side code or public repositories. Use browser keys (`pk`) for any code that runs in the browser.
+</Warning>
+
+## Request Format
+
+Every request uses `Content-Type: application/json` and sends a JSON body. Even read operations — such as `account.get` — use POST with an empty body `{}`.
+
+```http
+POST /v1/auth/code/send HTTP/1.1
+Host: platform.trylath.com
+Authorization: Bearer lath_live_sk...
+Content-Type: application/json
+
+{
+  "email": "ada@example.com"
+}
+```
+
+## Response Format
+
+Every successful response returns the same envelope:
+
+```json
+{
+  "activityId": "act_7Qw1e8",
+  "result": { ... }
+}
+```
+
+`activityId` is a unique identifier for mutating operations — you can use it to correlate events in logs and webhooks. It is an empty string for read-only operations. The shape of `result` varies by endpoint and is documented on each endpoint's reference page.
+
+## Error Format
+
+When a request fails, Lath returns an error object in place of the result envelope:
+
+```json
+{
+  "error": {
+    "code": "invalid_input",
+    "message": "The field 'email' is required."
+  }
+}
+```
+
+`code` is a stable machine-readable string you can branch on in your code. `message` is a human-readable description intended for logs and debugging — do not display it verbatim to end users.
+
+## HTTP Status Codes
+
+| Code | Meaning |
+|---|---|
+| `200` | Success — check the `result` field |
+| `400` | `invalid_input` or `invalid_json` — fix your request body |
+| `401` | `unauthenticated` — missing or invalid API key |
+| `403` | `forbidden` — valid key but insufficient scope for this operation |
+| `404` | `not_found` — the referenced resource does not exist |
+| `409` | Conflict — `idempotency_mismatch`, `email_taken`, or `last_key` |
+| `413` | `body_too_large` — reduce the size of your request body |
+| `429` | `rate_limited` — back off and retry with exponential delay |
+
+## Idempotency
+
+Add an `Idempotency-Key` header to any mutating request. If you retry the same key with the same request body, Lath replays the stored response instead of executing the operation again — protecting you from double-sends and duplicate records.
+
+```http
+Idempotency-Key: your-unique-key-here
+```
+
+<Tip>
+  Use a UUID or a stable hash of the operation's inputs as your idempotency key. Keys are scoped to your API key and expire after 24 hours.
+</Tip>
+
+If you send the same idempotency key with a **different** request body, Lath returns `409 idempotency_mismatch` rather than executing the new request.
+
+## API Areas
+
+<CardGroup cols={2}>
+  <Card title="Auth API" icon="lock" href="/api-reference/auth/sign-in">
+    67 operations — email codes, magic links, passwords, passkeys, OAuth, sessions, and organizations.
+  </Card>
+  <Card title="Email API" icon="envelope" href="/api-reference/email/send">
+    38 operations — transactional send, templates with translations, broadcasts, automations, and inbound.
+  </Card>
+  <Card title="SMS API" icon="message-sms" href="/api-reference/sms/send">
+    26 operations — send, templates, quiet hours, STOP/HELP/START keywords, and carrier registration.
+  </Card>
+  <Card title="Audience API" icon="users" href="/api-reference/audience/contacts">
+    27 operations — unified contact record, consent per channel, segments, and hosted preference pages.
+  </Card>
+  <Card title="Account API" icon="gear" href="/api-reference/account/overview">
+    14 operations — manage your Lath account settings, API keys, team members, and workspace configuration.
+  </Card>
+  <Card title="Billing API" icon="credit-card" href="/api-reference/billing/spending-cap">
+    13 operations — configure spending caps, retrieve usage data, and manage your subscription and payment methods.
+  </Card>
+</CardGroup>
